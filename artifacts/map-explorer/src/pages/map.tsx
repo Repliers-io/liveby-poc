@@ -99,6 +99,10 @@ export default function MapExplorer() {
   const listingsSessionRef = useRef(0);
   const listingsBatchRef = useRef(0);
   const layerJustChangedRef = useRef(false);
+  // Delta-update tracking: coordinate-keyed feature map persists across bounds-only reloads
+  const listingFeaturesRef = useRef<Map<string, GeoJSON.Feature>>(new Map());
+  // Stable "identity" of everything except viewport bounds — changes trigger a full reset
+  const listingsResetKeyRef = useRef("");
 
   // Step 1: init map
   useEffect(() => {
@@ -444,57 +448,73 @@ export default function MapExplorer() {
 
     if (!m || !styleReady || !selectedLocation) {
       clearListingLayers();
+      listingFeaturesRef.current.clear();
+      listingsResetKeyRef.current = "";
       setListingCount(null);
       setListingsLoading(false);
       return;
     }
 
+    // Anything that should wipe existing dots and start fresh (not viewport-pan/zoom)
+    const resetKey = [
+      selectedLocation.locationId,
+      activeLayer,
+      JSON.stringify(listingFilters),
+      listingStyleRetry,
+    ].join("|");
+
+    const isBoundsOnly = listingsResetKeyRef.current === resetKey && listingFeaturesRef.current.size > 0;
+    listingsResetKeyRef.current = resetKey;
+
     const session = ++listingsSessionRef.current;
     listingsBatchRef.current = 0;
-    setListingCount(null);
     setListingsLoading(true);
-
-    clearListingLayers();
 
     const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
 
-    try {
-      m.addSource(LISTINGS_SRC, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-      m.addLayer({
-        id: LISTINGS_DOT,
-        type: "circle",
-        source: LISTINGS_SRC,
-        paint: {
-          "circle-color": color,
-          "circle-radius": 6,
-          "circle-opacity": 0.88,
-          "circle-stroke-width": 1.5,
-          "circle-stroke-color": "rgba(0,0,0,0.6)",
-        },
-      });
-      m.addLayer({
-        id: LISTINGS_BLOOM,
-        type: "circle",
-        source: LISTINGS_SRC,
-        filter: ["==", ["get", "batchId"], -1],
-        paint: {
-          "circle-color": color,
-          "circle-radius": 6,
-          "circle-opacity": 0,
-          "circle-stroke-width": 0,
-        },
-      });
-    } catch (e) {
-      console.warn("[Map] Style not ready for listing layers, retrying…", e);
-      setListingsLoading(false);
-      const timer = setTimeout(() => setListingStyleRetry((n) => n + 1), 200);
-      return () => clearTimeout(timer);
+    if (!isBoundsOnly) {
+      // Full reset: clear existing dots and rebuild layers
+      listingFeaturesRef.current.clear();
+      setListingCount(null);
+      clearListingLayers();
+
+      try {
+        m.addSource(LISTINGS_SRC, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+        m.addLayer({
+          id: LISTINGS_DOT,
+          type: "circle",
+          source: LISTINGS_SRC,
+          paint: {
+            "circle-color": color,
+            "circle-radius": 6,
+            "circle-opacity": 0.88,
+            "circle-stroke-width": 1.5,
+            "circle-stroke-color": "rgba(0,0,0,0.6)",
+          },
+        });
+        m.addLayer({
+          id: LISTINGS_BLOOM,
+          type: "circle",
+          source: LISTINGS_SRC,
+          filter: ["==", ["get", "batchId"], -1],
+          paint: {
+            "circle-color": color,
+            "circle-radius": 6,
+            "circle-opacity": 0,
+            "circle-stroke-width": 0,
+          },
+        });
+      } catch (e) {
+        console.warn("[Map] Style not ready for listing layers, retrying…", e);
+        setListingsLoading(false);
+        const timer = setTimeout(() => setListingStyleRetry((n) => n + 1), 200);
+        return () => clearTimeout(timer);
+      }
     }
 
-    let allFeatures: GeoJSON.Feature[] = [];
     let animFrame: number | null = null;
 
     const animateBloom = (batchNum: number) => {
@@ -523,26 +543,33 @@ export default function MapExplorer() {
       animFrame = requestAnimationFrame(frame);
     };
 
+    // Delta-aware addBatch: only adds features not already keyed by coordinate
     const addBatch = (listings: RawListing[]) => {
       if (listingsSessionRef.current !== session) return;
-      if (allFeatures.length >= MAX_MAP_POINTS) return;
+      const featureMap = listingFeaturesRef.current;
+      if (featureMap.size >= MAX_MAP_POINTS) return;
 
       const batchNum = ++listingsBatchRef.current;
-      const room = MAX_MAP_POINTS - allFeatures.length;
+      let addedAny = false;
 
-      const newFeatures: GeoJSON.Feature[] = listings
-        .slice(0, room)
-        .filter((l) => l.map?.latitude && l.map?.longitude)
-        .map((l) => ({
-          type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [l.map.longitude, l.map.latitude] },
+      for (const l of listings) {
+        if (featureMap.size >= MAX_MAP_POINTS) break;
+        if (!l.map?.latitude || !l.map?.longitude) continue;
+        const key = `${l.map.longitude.toFixed(5)},${l.map.latitude.toFixed(5)}`;
+        if (featureMap.has(key)) continue; // already on map — skip, no flicker
+
+        featureMap.set(key, {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [l.map.longitude, l.map.latitude] },
           properties: { batchId: batchNum },
-        }));
+        });
+        addedAny = true;
+      }
 
-      allFeatures = allFeatures.concat(newFeatures);
+      if (!addedAny) return; // nothing new to paint
 
       const src = m.getSource(LISTINGS_SRC) as maplibregl.GeoJSONSource | undefined;
-      if (src) src.setData({ type: "FeatureCollection", features: allFeatures });
+      if (src) src.setData({ type: "FeatureCollection", features: Array.from(featureMap.values()) });
 
       animateBloom(batchNum);
     };
@@ -577,15 +604,18 @@ export default function MapExplorer() {
 
       const totalCount = first.count; // real Repliers total — never changes
       addBatch(first.listings);
-      // Surface the real total immediately so it's always visible
-      setListingCount({ loaded: allFeatures.length, total: totalCount });
+      setListingCount({ loaded: listingFeaturesRef.current.size, total: totalCount });
 
       const totalPages = first.numPages;
 
-      for (let page = 2; page <= totalPages && allFeatures.length < MAX_MAP_POINTS; page += LISTINGS_CONCURRENCY) {
+      for (
+        let page = 2;
+        page <= totalPages && listingFeaturesRef.current.size < MAX_MAP_POINTS;
+        page += LISTINGS_CONCURRENCY
+      ) {
         if (listingsSessionRef.current !== session) return;
 
-        const pagesStillNeeded = Math.ceil((MAX_MAP_POINTS - allFeatures.length) / RESULTS_PER_PAGE);
+        const pagesStillNeeded = Math.ceil((MAX_MAP_POINTS - listingFeaturesRef.current.size) / RESULTS_PER_PAGE);
         const batchSize = Math.min(LISTINGS_CONCURRENCY, pagesStillNeeded, totalPages - page + 1);
         const batch = Array.from({ length: batchSize }, (_, i) => page + i);
 
@@ -595,7 +625,7 @@ export default function MapExplorer() {
           if (listingsSessionRef.current !== session) return;
           if (r.status === "fulfilled") {
             addBatch(r.value.listings);
-            setListingCount({ loaded: allFeatures.length, total: totalCount });
+            setListingCount({ loaded: listingFeaturesRef.current.size, total: totalCount });
           }
         }
 
@@ -614,10 +644,10 @@ export default function MapExplorer() {
     return () => {
       listingsSessionRef.current++;
       if (animFrame !== null) cancelAnimationFrame(animFrame);
-      // Skip map interactions if Step 1 already destroyed the map (map.current === null)
-      if (map.current) clearListingLayers();
-      setListingCount(null);
       setListingsLoading(false);
+      // Listing layers stay alive across bounds-only reloads.
+      // On full unmount, Step 1 cleanup destroys the map; guard against that.
+      // On selectedLocation → null, the early return above handles clearListingLayers.
     };
   }, [selectedLocation, styleReady, mapReady, activeLayer, listingFilters, listingStyleRetry, listingBoundsKey]);
 
