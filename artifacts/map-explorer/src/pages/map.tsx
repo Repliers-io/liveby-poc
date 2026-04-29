@@ -229,25 +229,42 @@ export default function MapExplorer() {
       maxWidth: "240px",
     });
 
+    let hoveredId: string | number | undefined;
+
+    const clearHover = () => {
+      if (hoveredId !== undefined) {
+        m.setFeatureState({ source: SRC, id: hoveredId }, { hover: false });
+        hoveredId = undefined;
+      }
+    };
+
     const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
-      if (!e.features?.length) return;
       m.getCanvas().style.cursor = "pointer";
-      const id = e.features[0].id;
-      if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: true });
+      if (!e.features?.length) return;
+      clearHover();
+      hoveredId = e.features[0].id;
+      if (hoveredId !== undefined) m.setFeatureState({ source: SRC, id: hoveredId }, { hover: true });
       const name = (e.features[0].properties as { name: string }).name;
       tooltip.setLngLat(e.lngLat).setHTML(`<span>${name}</span>`).addTo(m);
     };
 
     const onMove = (e: maplibregl.MapLayerMouseEvent) => {
-      if (tooltip.isOpen()) tooltip.setLngLat(e.lngLat);
+      if (!e.features?.length) return;
+      tooltip.setLngLat(e.lngLat);
+      const newId = e.features[0].id;
+      // If we've crossed into a different feature, update hover state and tooltip text
+      if (newId !== hoveredId) {
+        clearHover();
+        hoveredId = newId;
+        if (hoveredId !== undefined) m.setFeatureState({ source: SRC, id: hoveredId }, { hover: true });
+        const name = (e.features[0].properties as { name: string }).name;
+        tooltip.setHTML(`<span>${name}</span>`);
+      }
     };
 
-    const onLeave = (e: maplibregl.MapLayerMouseEvent) => {
+    const onLeave = () => {
       m.getCanvas().style.cursor = "";
-      if (e.features?.length) {
-        const id = e.features[0].id;
-        if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: false });
-      }
+      clearHover();
       tooltip.remove();
     };
 
@@ -276,6 +293,7 @@ export default function MapExplorer() {
       m.off("mousemove", FILL, onMove);
       m.off("mouseleave", FILL, onLeave);
       m.off("click", FILL, onClick);
+      clearHover();
       tooltip.remove();
       removeLayers();
     };
