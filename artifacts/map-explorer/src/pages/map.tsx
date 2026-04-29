@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@workspace/api-client-react";
 import { Loader2, Layers, Home } from "lucide-react";
 import DemographicsDrawer, { Demographics } from "../components/DemographicsDrawer";
+import SchoolDrawer, { SchoolData } from "../components/SchoolDrawer";
 
 type RawListing = {
   map: { latitude: number; longitude: number };
@@ -56,6 +57,7 @@ type SelectedLocation = {
   name: string;
   locationId: string;
   demographics: Demographics;
+  school: SchoolData | null;
 };
 
 // Flatten any depth of coordinate arrays to extract [lng, lat] pairs
@@ -281,11 +283,13 @@ export default function MapExplorer() {
         name: string;
         locationId: string;
         demographics: string;
+        school: string;
       };
       setSelectedLocation({
         name: props.name,
         locationId: props.locationId,
         demographics: JSON.parse(props.demographics || "{}") as Demographics,
+        school: JSON.parse(props.school || "null") as SchoolData | null,
       });
     };
 
@@ -339,6 +343,7 @@ export default function MapExplorer() {
             name: loc.name,
             locationId: loc.locationId,
             demographics: JSON.stringify((loc as any).demographics ?? {}),
+            school: JSON.stringify((loc as any).school ?? null),
           },
         };
       });
@@ -829,8 +834,19 @@ export default function MapExplorer() {
         })()}
       </div>
 
-      {/* Demographics drawer */}
-      {layerCfg && (
+      {/* School drawer (shown when school layer is active) */}
+      {activeLayer === "school" && (
+        <SchoolDrawer
+          open={!!selectedLocation}
+          name={selectedLocation?.name ?? ""}
+          layerColor={LAYER_CONFIG.school.color}
+          school={selectedLocation?.school ?? {}}
+          onClose={() => setSelectedLocation(null)}
+        />
+      )}
+
+      {/* Demographics drawer (shown for all non-school layers) */}
+      {layerCfg && activeLayer !== "school" && (
         <DemographicsDrawer
           open={!!selectedLocation}
           name={selectedLocation?.name ?? ""}
