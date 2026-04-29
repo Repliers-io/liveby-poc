@@ -141,7 +141,7 @@ export default function MapExplorer() {
     }
   );
 
-  // Step 3: draw boundary layers
+  // Step 3a: set up layer structure (only when layer type changes — avoids teardown flicker)
   useEffect(() => {
     const m = map.current;
     if (!m || !mapReady || !styleReady) return;
@@ -152,47 +152,19 @@ export default function MapExplorer() {
         if (m.getLayer(FILL)) m.removeLayer(FILL);
         if (m.getLayer(LINE)) m.removeLayer(LINE);
         if (m.getSource(SRC)) m.removeSource(SRC);
-      } catch {
-        // map already destroyed
-      }
+      } catch { /* map already destroyed */ }
     };
 
     removeLayers();
-
-    if (!activeLayer || !locationsData?.locations?.length) return;
+    if (!activeLayer) return;
 
     const { color } = LAYER_CONFIG[activeLayer];
 
-    type LocMap = { boundary?: number[][][] | number[][][][]; geometryType?: string };
-
-    const features: GeoJSON.Feature[] = locationsData.locations
-      .filter((loc) => {
-        const lm = loc.map as LocMap | undefined;
-        return Array.isArray(lm?.boundary) && lm!.boundary!.length > 0;
-      })
-      .map((loc) => {
-        const lm = loc.map as LocMap;
-        return {
-          type: "Feature" as const,
-          geometry: {
-            type: lm.geometryType ?? "Polygon",
-            coordinates: lm.boundary!,
-          } as GeoJSON.Geometry,
-          properties: {
-            name: loc.name,
-            locationId: loc.locationId,
-            // Embed demographics so onClick can read them without stale closure issues
-            demographics: JSON.stringify((loc as any).demographics ?? {}),
-          },
-        };
-      });
-
-    if (!features.length) return;
-
     try {
+      // Start with empty data — Step 3b will fill it in
       m.addSource(SRC, {
         type: "geojson",
-        data: { type: "FeatureCollection", features },
+        data: { type: "FeatureCollection", features: [] },
         generateId: true,
       });
 
@@ -257,7 +229,41 @@ export default function MapExplorer() {
       m.off("click", FILL, onClick);
       removeLayers();
     };
-  }, [locationsData, activeLayer, mapReady, styleReady]);
+  }, [activeLayer, mapReady, styleReady]);
+
+  // Step 3b: push new data into the existing source (no layer teardown → no flicker)
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !styleReady) return;
+
+    const src = m.getSource(SRC) as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+
+    type LocMap = { boundary?: number[][][] | number[][][][]; geometryType?: string };
+
+    const features: GeoJSON.Feature[] = (locationsData?.locations ?? [])
+      .filter((loc) => {
+        const lm = loc.map as LocMap | undefined;
+        return Array.isArray(lm?.boundary) && lm!.boundary!.length > 0;
+      })
+      .map((loc) => {
+        const lm = loc.map as LocMap;
+        return {
+          type: "Feature" as const,
+          geometry: {
+            type: lm.geometryType ?? "Polygon",
+            coordinates: lm.boundary!,
+          } as GeoJSON.Geometry,
+          properties: {
+            name: loc.name,
+            locationId: loc.locationId,
+            demographics: JSON.stringify((loc as any).demographics ?? {}),
+          },
+        };
+      });
+
+    src.setData({ type: "FeatureCollection", features });
+  }, [locationsData, styleReady]);
 
   // Keep refs in sync so stable closures (moveend) can read current values
   useEffect(() => { selectedRef.current = selectedLocation; }, [selectedLocation]);
