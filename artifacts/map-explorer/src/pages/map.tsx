@@ -289,6 +289,24 @@ export default function MapExplorer() {
         m.setFilter(FILL, null);
         m.setFilter(LINE, null);
         m.setPaintProperty(FILL, "fill-opacity", 0);
+
+        // Fit to all loaded boundaries so the user sees the full picture
+        const allCoords = locationsRef.current
+          .filter((l) => l.map?.boundary)
+          .flatMap((l) => flatCoords(l.map.boundary as unknown[]));
+        if (allCoords.length > 0) {
+          let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+          for (const [lng, lat] of allCoords) {
+            if (lng < minLng) minLng = lng;
+            if (lng > maxLng) maxLng = lng;
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+          }
+          m.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+            padding: 80,
+            duration: 600,
+          });
+        }
       }
     } catch {
       // layers not ready
