@@ -217,7 +217,7 @@ export default function MapExplorer() {
     };
   }, [locationsData, activeLayer, mapReady, styleReady]);
 
-  // Step 4: isolate selected boundary — filter map to show only clicked feature
+  // Step 4: isolate selected boundary — filter + fill opacity
   useEffect(() => {
     const m = map.current;
     if (!m || !styleReady) return;
@@ -227,9 +227,11 @@ export default function MapExplorer() {
         const f = ["==", ["get", "locationId"], selectedLocation.locationId] as maplibregl.FilterSpecification;
         m.setFilter(FILL, f);
         m.setFilter(LINE, f);
+        m.setPaintProperty(FILL, "fill-opacity", 0.1);
       } else {
         m.setFilter(FILL, null);
         m.setFilter(LINE, null);
+        m.setPaintProperty(FILL, "fill-opacity", 0);
       }
     } catch {
       // layers not ready
