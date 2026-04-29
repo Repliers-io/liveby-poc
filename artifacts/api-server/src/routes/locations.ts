@@ -49,11 +49,12 @@ router.get("/locations", async (req, res) => {
       return;
     }
 
-    const data = await response.json();
+    const data = await response.json() as Record<string, unknown>;
+    const locations = data["locations"] ?? data ?? [];
 
     res.json({
-      locations: data.locations ?? data ?? [],
-      count: data.count ?? (Array.isArray(data.locations) ? data.locations.length : 0),
+      locations,
+      count: data["count"] ?? (Array.isArray(locations) ? locations.length : 0),
     });
   } catch (err) {
     req.log.error({ err }, "Failed to fetch from Repliers API");

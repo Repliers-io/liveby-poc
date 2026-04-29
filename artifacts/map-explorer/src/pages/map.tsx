@@ -2,8 +2,23 @@ import React, { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@workspace/api-client-react";
-import { Loader2, Layers } from "lucide-react";
+import { Loader2, Layers, Home } from "lucide-react";
 import DemographicsDrawer, { Demographics } from "../components/DemographicsDrawer";
+
+type RawListing = {
+  mlsNumber: string;
+  status: string;
+  listPrice: number;
+  map: { latitude: number; longitude: number };
+  address: { streetNumber: string; streetName: string; streetSuffix?: string; city: string; state: string };
+  details?: { numBedrooms?: number; numBathrooms?: number; propertyType?: string; sqft?: number };
+};
+
+const LISTINGS_SRC = "listings-src";
+const LISTINGS_DOT = "listings-dot";
+const LISTINGS_BLOOM = "listings-bloom";
+const LISTINGS_CONCURRENCY = 4;
+const MAX_LISTING_PAGES = 50; // ~5,000 listings cap
 
 type LayerType = "area" | "city" | "neighborhood" | "school" | null;
 
@@ -52,9 +67,13 @@ export default function MapExplorer() {
   const [styleReady, setStyleReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
+  const [listingCount, setListingCount] = useState<{ loaded: number; total: number } | null>(null);
+  const [listingsLoading, setListingsLoading] = useState(false);
   // Refs used inside stable event-handler closures
   const selectedRef = useRef<SelectedLocation | null>(null);
   const locationsRef = useRef<any[]>([]);
+  const listingsSessionRef = useRef(0);
+  const listingsBatchRef = useRef(0);
 
   // Step 1: init map
   useEffect(() => {
@@ -67,9 +86,8 @@ export default function MapExplorer() {
         style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
         center: [-95.33, 29.75],
         zoom: 10,
-        antialias: true,
         failIfMajorPerformanceCaveat: false,
-      });
+      } as maplibregl.MapOptions);
     } catch {
       setInitError("WebGL is not available in this environment. Try opening the app in a full browser tab.");
       return;
@@ -282,6 +300,188 @@ export default function MapExplorer() {
     setSelectedLocation(null);
   }, [activeLayer]);
 
+  // Step 5: load and display listings for the selected boundary
+  useEffect(() => {
+    const m = map.current;
+
+    const clearListingLayers = () => {
+      if (!m) return;
+      try {
+        if (m.getLayer(LISTINGS_BLOOM)) m.removeLayer(LISTINGS_BLOOM);
+        if (m.getLayer(LISTINGS_DOT)) m.removeLayer(LISTINGS_DOT);
+        if (m.getSource(LISTINGS_SRC)) m.removeSource(LISTINGS_SRC);
+      } catch { /* ignore */ }
+    };
+
+    if (!m || !styleReady || !selectedLocation) {
+      clearListingLayers();
+      setListingCount(null);
+      setListingsLoading(false);
+      return;
+    }
+
+    const session = ++listingsSessionRef.current;
+    listingsBatchRef.current = 0;
+    setListingCount(null);
+    setListingsLoading(true);
+
+    clearListingLayers();
+
+    const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
+
+    m.addSource(LISTINGS_SRC, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+
+    m.addLayer({
+      id: LISTINGS_DOT,
+      type: "circle",
+      source: LISTINGS_SRC,
+      paint: {
+        "circle-color": [
+          "match", ["get", "status"],
+          "A", color,
+          "U", "#FBBF24",
+          "S", "#6B7280",
+          "#9CA3AF",
+        ],
+        "circle-radius": 6,
+        "circle-opacity": 0.88,
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "rgba(0,0,0,0.6)",
+      },
+    });
+
+    m.addLayer({
+      id: LISTINGS_BLOOM,
+      type: "circle",
+      source: LISTINGS_SRC,
+      filter: ["==", ["get", "batchId"], -1],
+      paint: {
+        "circle-color": color,
+        "circle-radius": 6,
+        "circle-opacity": 0,
+        "circle-stroke-width": 0,
+      },
+    });
+
+    let allFeatures: GeoJSON.Feature[] = [];
+    let animFrame: number | null = null;
+
+    const animateBloom = (batchNum: number) => {
+      if (animFrame !== null) cancelAnimationFrame(animFrame);
+      m.setFilter(LISTINGS_BLOOM, ["==", ["get", "batchId"], batchNum]);
+
+      const startTime = performance.now();
+      const duration = 500;
+      const startRadius = 18;
+      const endRadius = 6;
+      const startOpacity = 0.55;
+
+      const frame = (now: number) => {
+        if (listingsSessionRef.current !== session) return;
+        const t = Math.min((now - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - t, 3);
+        try {
+          m.setPaintProperty(LISTINGS_BLOOM, "circle-radius", startRadius + (endRadius - startRadius) * ease);
+          m.setPaintProperty(LISTINGS_BLOOM, "circle-opacity", startOpacity * (1 - t));
+        } catch { return; }
+        if (t < 1) animFrame = requestAnimationFrame(frame);
+      };
+
+      m.setPaintProperty(LISTINGS_BLOOM, "circle-radius", startRadius);
+      m.setPaintProperty(LISTINGS_BLOOM, "circle-opacity", startOpacity);
+      animFrame = requestAnimationFrame(frame);
+    };
+
+    const addBatch = (listings: RawListing[]) => {
+      if (listingsSessionRef.current !== session) return;
+      const batchNum = ++listingsBatchRef.current;
+
+      const newFeatures: GeoJSON.Feature[] = listings
+        .filter((l) => l.map?.latitude && l.map?.longitude)
+        .map((l) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [l.map.longitude, l.map.latitude] },
+          properties: {
+            mlsNumber: l.mlsNumber,
+            listPrice: l.listPrice,
+            status: l.status,
+            batchId: batchNum,
+            beds: l.details?.numBedrooms ?? 0,
+            baths: l.details?.numBathrooms ?? 0,
+            propertyType: l.details?.propertyType ?? "",
+          },
+        }));
+
+      allFeatures = allFeatures.concat(newFeatures);
+
+      const src = m.getSource(LISTINGS_SRC) as maplibregl.GeoJSONSource | undefined;
+      if (src) src.setData({ type: "FeatureCollection", features: allFeatures });
+
+      animateBloom(batchNum);
+    };
+
+    const fetchPage = async (pageNum: number): Promise<{ listings: RawListing[]; numPages: number; count: number }> => {
+      const res = await fetch(
+        `/api/listings?locationId=${encodeURIComponent(selectedLocation.locationId)}&pageNum=${pageNum}&resultsPerPage=100`
+      );
+      if (!res.ok) throw new Error(`listings fetch failed: ${res.status}`);
+      return res.json();
+    };
+
+    const loadAll = async () => {
+      const first = await fetchPage(1);
+      if (listingsSessionRef.current !== session) return;
+
+      addBatch(first.listings);
+      const totalPages = Math.min(first.numPages, MAX_LISTING_PAGES);
+      const totalCount = first.count;
+      setListingCount({ loaded: first.listings.length, total: totalCount });
+
+      let loaded = first.listings.length;
+
+      for (let page = 2; page <= totalPages; page += LISTINGS_CONCURRENCY) {
+        if (listingsSessionRef.current !== session) return;
+
+        const batch = Array.from(
+          { length: Math.min(LISTINGS_CONCURRENCY, totalPages - page + 1) },
+          (_, i) => page + i
+        );
+
+        const results = await Promise.allSettled(batch.map(fetchPage));
+
+        for (const r of results) {
+          if (listingsSessionRef.current !== session) return;
+          if (r.status === "fulfilled") {
+            addBatch(r.value.listings);
+            loaded += r.value.listings.length;
+            setListingCount({ loaded, total: totalCount });
+          }
+        }
+
+        // small stagger so animations don't all pile up
+        await new Promise((res) => setTimeout(res, 180));
+      }
+
+      if (listingsSessionRef.current === session) setListingsLoading(false);
+    };
+
+    loadAll().catch((err) => {
+      console.error("[Listings] load error:", err);
+      if (listingsSessionRef.current === session) setListingsLoading(false);
+    });
+
+    return () => {
+      listingsSessionRef.current++;
+      if (animFrame !== null) cancelAnimationFrame(animFrame);
+      clearListingLayers();
+      setListingCount(null);
+      setListingsLoading(false);
+    };
+  }, [selectedLocation, styleReady, mapReady, activeLayer]);
+
   // Popup CSS (just for popups we may add later — kept as baseline)
   useEffect(() => {
     const style = document.createElement("style");
@@ -290,7 +490,7 @@ export default function MapExplorer() {
       .maplibregl-popup-tip { display:none; }
     `;
     document.head.appendChild(style);
-    return () => document.head.removeChild(style);
+    return () => { document.head.removeChild(style); };
   }, []);
 
   if (initError) {
@@ -366,6 +566,30 @@ export default function MapExplorer() {
           >
             ← Show all boundaries
           </button>
+        )}
+
+        {selectedLocation && (listingsLoading || listingCount) && (
+          <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-3 py-2.5 rounded-lg flex items-center gap-2 w-52">
+            <Home className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
+            {listingsLoading ? (
+              <div className="flex items-center gap-2 min-w-0">
+                <Loader2 className="w-3 h-3 text-zinc-500 animate-spin flex-shrink-0" />
+                <span className="text-xs text-zinc-400 truncate">
+                  {listingCount
+                    ? `${listingCount.loaded.toLocaleString()} / ${listingCount.total.toLocaleString()} listings`
+                    : "Loading listings…"}
+                </span>
+              </div>
+            ) : listingCount ? (
+              <span className="text-xs text-zinc-400">
+                <span className="text-zinc-200 font-medium">{listingCount.loaded.toLocaleString()}</span>
+                {listingCount.total > listingCount.loaded && (
+                  <> of {listingCount.total.toLocaleString()}</>
+                )}{" "}
+                listings
+              </span>
+            ) : null}
+          </div>
         )}
       </div>
 
