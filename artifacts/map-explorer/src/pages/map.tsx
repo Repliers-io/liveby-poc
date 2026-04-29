@@ -523,6 +523,8 @@ export default function MapExplorer() {
 
     // Tracks every coord key returned by THIS fetch — used for reconciliation at the end
     const newKeySet = new Set<string>();
+    // Counts every valid listing processed this fetch (may exceed unique pins due to shared coords)
+    let listingsFetched = 0;
 
     const animateBloom = (batchNum: number) => {
       if (animFrame !== null) cancelAnimationFrame(animFrame);
@@ -559,8 +561,9 @@ export default function MapExplorer() {
       let addedAny = false;
 
       for (const l of listings) {
-        if (newKeySet.size >= MAX_MAP_POINTS) break;
+        if (listingsFetched >= MAX_MAP_POINTS) break;
         if (!l.map?.latitude || !l.map?.longitude) continue;
+        listingsFetched++; // count every valid listing, even coordinate duplicates
         const key = `${l.map.longitude.toFixed(5)},${l.map.latitude.toFixed(5)}`;
         newKeySet.add(key); // always register, even if already on map
 
@@ -631,18 +634,18 @@ export default function MapExplorer() {
 
       const totalCount = first.count;
       addBatch(first.listings);
-      setListingCount({ loaded: listingFeaturesRef.current.size, total: totalCount });
+      setListingCount({ loaded: listingsFetched, total: totalCount });
 
       const totalPages = first.numPages;
 
       for (
         let page = 2;
-        page <= totalPages && newKeySet.size < MAX_MAP_POINTS;
+        page <= totalPages && listingsFetched < MAX_MAP_POINTS;
         page += LISTINGS_CONCURRENCY
       ) {
         if (listingsSessionRef.current !== session) return;
 
-        const pagesStillNeeded = Math.ceil((MAX_MAP_POINTS - newKeySet.size) / RESULTS_PER_PAGE);
+        const pagesStillNeeded = Math.ceil((MAX_MAP_POINTS - listingsFetched) / RESULTS_PER_PAGE);
         const batchSize = Math.min(LISTINGS_CONCURRENCY, pagesStillNeeded, totalPages - page + 1);
         const batch = Array.from({ length: batchSize }, (_, i) => page + i);
 
@@ -652,7 +655,7 @@ export default function MapExplorer() {
           if (listingsSessionRef.current !== session) return;
           if (r.status === "fulfilled") {
             addBatch(r.value.listings);
-            setListingCount({ loaded: listingFeaturesRef.current.size, total: totalCount });
+            setListingCount({ loaded: listingsFetched, total: totalCount });
           }
         }
 
@@ -661,7 +664,7 @@ export default function MapExplorer() {
 
       // Remove any dot not returned by this fetch (filter/zoom changed what's relevant)
       reconcile();
-      setListingCount({ loaded: listingFeaturesRef.current.size, total: totalCount });
+      setListingCount({ loaded: listingsFetched, total: totalCount });
 
       if (listingsSessionRef.current === session) setListingsLoading(false);
     };
