@@ -153,7 +153,7 @@ export default function MapExplorer() {
       source: SRC,
       paint: {
         "fill-color": color,
-        "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.45, 0.2],
+        "fill-opacity": 0,
       },
     });
 
@@ -161,7 +161,11 @@ export default function MapExplorer() {
       id: LINE,
       type: "line",
       source: SRC,
-      paint: { "line-color": color, "line-width": 1.5 },
+      paint: {
+        "line-color": color,
+        "line-width": ["case", ["boolean", ["feature-state", "hover"], false], 2.5, 1.5],
+        "line-opacity": 0.9,
+      },
     });
 
     const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false });
