@@ -233,7 +233,7 @@ export default function MapExplorer() {
 
     const clearHover = () => {
       if (hoveredId !== undefined) {
-        try { m.setFeatureState({ source: SRC, id: hoveredId }, { hover: false }); } catch { /* map may be torn down */ }
+        m.setFeatureState({ source: SRC, id: hoveredId }, { hover: false });
         hoveredId = undefined;
       }
     };
@@ -295,12 +295,15 @@ export default function MapExplorer() {
     m.on("click", FILL, onClick);
 
     return () => {
+      tooltip.remove();
+      // map.current is set to null by the Step 1 cleanup on component unmount.
+      // If it's null here, the map has already been destroyed — skip all map calls.
+      if (!map.current) return;
       m.off("mouseenter", FILL, onEnter);
       m.off("mousemove", FILL, onMove);
       m.off("mouseleave", FILL, onLeave);
       m.off("click", FILL, onClick);
       clearHover();
-      tooltip.remove();
       removeLayers();
     };
   }, [activeLayer, mapReady, styleReady]);
@@ -606,7 +609,8 @@ export default function MapExplorer() {
     return () => {
       listingsSessionRef.current++;
       if (animFrame !== null) cancelAnimationFrame(animFrame);
-      clearListingLayers();
+      // Skip map interactions if Step 1 already destroyed the map (map.current === null)
+      if (map.current) clearListingLayers();
       setListingCount(null);
       setListingsLoading(false);
     };
