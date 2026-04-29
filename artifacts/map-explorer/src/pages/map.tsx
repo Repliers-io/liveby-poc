@@ -88,6 +88,7 @@ export default function MapExplorer() {
   const [listingCount, setListingCount] = useState<{ loaded: number; total: number } | null>(null);
   const [listingsLoading, setListingsLoading] = useState(false);
   const [listingFilters, setListingFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
+  const [listingStyleRetry, setListingStyleRetry] = useState(0);
   // Refs used inside stable event-handler closures
   const selectedRef = useRef<SelectedLocation | null>(null);
   const locationsRef = useRef<any[]>([]);
@@ -420,7 +421,10 @@ export default function MapExplorer() {
 
     if (!m.isStyleLoaded()) {
       setListingsLoading(false);
-      return;
+      // retry once the style finishes loading
+      const onReady = () => { if (m.isStyleLoaded()) setListingStyleRetry((n) => n + 1); };
+      m.once("styledata", onReady);
+      return () => { m.off("styledata", onReady); };
     }
 
     const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
@@ -459,6 +463,9 @@ export default function MapExplorer() {
     } catch (e) {
       console.warn("[Map] Failed to add listing layers:", e);
       setListingsLoading(false);
+      // style wasn't ready — retry when it settles
+      const onReady = () => { if (m.isStyleLoaded()) setListingStyleRetry((n) => n + 1); };
+      m.once("styledata", onReady);
       return;
     }
 
@@ -577,7 +584,7 @@ export default function MapExplorer() {
       setListingCount(null);
       setListingsLoading(false);
     };
-  }, [selectedLocation, styleReady, mapReady, activeLayer, listingFilters]);
+  }, [selectedLocation, styleReady, mapReady, activeLayer, listingFilters, listingStyleRetry]);
 
   // Popup CSS (just for popups we may add later — kept as baseline)
   useEffect(() => {
