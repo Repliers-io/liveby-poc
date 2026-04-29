@@ -418,8 +418,14 @@ export default function MapExplorer() {
 
     clearListingLayers();
 
+    if (!m.isStyleLoaded()) {
+      setListingsLoading(false);
+      return;
+    }
+
     const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
 
+    try {
     m.addSource(LISTINGS_SRC, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -450,6 +456,11 @@ export default function MapExplorer() {
         "circle-stroke-width": 0,
       },
     });
+    } catch (e) {
+      console.warn("[Map] Failed to add listing layers:", e);
+      setListingsLoading(false);
+      return;
+    }
 
     let allFeatures: GeoJSON.Feature[] = [];
     let animFrame: number | null = null;
