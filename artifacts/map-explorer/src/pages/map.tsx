@@ -20,6 +20,7 @@ export default function MapExplorer() {
   const [activeLayer, setActiveLayer] = useState<LayerType>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [styleReady, setStyleReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
 
   // Init map on mount — uses CARTO's free dark style, no token needed
@@ -50,6 +51,11 @@ export default function MapExplorer() {
       console.log("[Map] loaded");
       instance.resize();
       setMapReady(true);
+      setStyleReady(true);
+    });
+
+    instance.on("styledata", () => {
+      if (instance.isStyleLoaded()) setStyleReady(true);
     });
 
     instance.on("moveend", () => {
@@ -68,6 +74,7 @@ export default function MapExplorer() {
       instance.remove();
       map.current = null;
       setMapReady(false);
+      setStyleReady(false);
     };
   }, []);
 
@@ -86,10 +93,10 @@ export default function MapExplorer() {
     }
   );
 
-  // Step 4: draw layers
+  // Step 3: draw layers
   useEffect(() => {
     const m = map.current;
-    if (!m || !mapReady) return;
+    if (!m || !mapReady || !styleReady) return;
 
     const SRC = "bounds-src";
     const FILL = "bounds-fill";
@@ -107,14 +114,31 @@ export default function MapExplorer() {
 
     const { color, label } = LAYER_CONFIG[activeLayer];
 
+    type LocMap = {
+      boundary?: number[][][] | number[][][][];
+      geometryType?: string;
+    };
     const features: GeoJSON.Feature[] = locationsData.locations
-      .filter((loc) => loc.map?.polygon)
-      .map((loc) => ({
-        type: "Feature" as const,
-        geometry: loc.map!.polygon as GeoJSON.Geometry,
-        properties: { name: loc.name, locationId: loc.locationId },
-      }));
+      .filter((loc) => {
+        const m = loc.map as LocMap | undefined;
+        return Array.isArray(m?.boundary) && m!.boundary!.length > 0;
+      })
+      .map((loc) => {
+        const m = loc.map as LocMap;
+        const geomType = m.geometryType ?? "Polygon";
+        return {
+          type: "Feature" as const,
+          geometry: {
+            type: geomType,
+            // boundary already matches GeoJSON coordinate nesting for both
+            // Polygon (number[][][]) and MultiPolygon (number[][][][])
+            coordinates: m.boundary!,
+          } as GeoJSON.Geometry,
+          properties: { name: loc.name, locationId: loc.locationId },
+        };
+      });
 
+    console.log(`[Map] ${activeLayer}: ${features.length} features loaded`);
     if (!features.length) return;
 
     m.addSource(SRC, {
@@ -186,7 +210,7 @@ export default function MapExplorer() {
       m.off("click", FILL, onClick);
       removeLayers();
     };
-  }, [locationsData, activeLayer, mapReady]);
+  }, [locationsData, activeLayer, mapReady, styleReady]);
 
   // Popup styles
   useEffect(() => {
