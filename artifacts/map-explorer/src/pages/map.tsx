@@ -233,7 +233,7 @@ export default function MapExplorer() {
 
     const clearHover = () => {
       if (hoveredId !== undefined) {
-        m.setFeatureState({ source: SRC, id: hoveredId }, { hover: false });
+        try { m.setFeatureState({ source: SRC, id: hoveredId }, { hover: false }); } catch { /* map may be torn down */ }
         hoveredId = undefined;
       }
     };
@@ -657,16 +657,10 @@ export default function MapExplorer() {
 
       {/* Controls */}
       <div style={{ position: "absolute", top: 16, left: 16, zIndex: 10, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-4 py-3 rounded-lg shadow-xl flex items-center gap-3">
-          <div className="bg-zinc-800 p-1.5 rounded-md">
-            <Layers className="w-4 h-4 text-zinc-300" />
-          </div>
-          <div>
-            <h1 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">Boundary Explorer</h1>
-            <p className="text-xs text-zinc-500">
-              {selectedLocation ? `Viewing: ${selectedLocation.name}` : "Select a layer below"}
-            </p>
-          </div>
+        <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-3 py-2.5 rounded-lg shadow-xl flex items-center gap-2.5">
+          <img src={`${import.meta.env.BASE_URL}repliers-logo.webp`} alt="Repliers" className="h-5 w-auto object-contain" />
+          <div className="w-px h-5 bg-zinc-700 flex-shrink-0" />
+          <img src={`${import.meta.env.BASE_URL}liveby-logo.png`} alt="LiveBy" className="h-5 w-auto object-contain" />
         </div>
 
         <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-2 rounded-lg shadow-xl w-52">
