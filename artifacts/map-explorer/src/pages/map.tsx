@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@workspace/api-client-react";
 import { Loader2, Layers } from "lucide-react";
 
@@ -15,243 +15,228 @@ const LAYER_CONFIG = {
 
 export default function MapExplorer() {
   const mapContainer = useRef<HTMLDivElement>(null);
-  const map = useRef<mapboxgl.Map | null>(null);
+  const map = useRef<maplibregl.Map | null>(null);
   const [center, setCenter] = useState<{ lat: number; lng: number }>({ lat: 29.75, lng: -95.33 });
   const [activeLayer, setActiveLayer] = useState<LayerType>(null);
-  const [hoveredLocationId, setHoveredLocationId] = useState<string | null>(null);
-  const [webglError, setWebglError] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
 
-  // Fetch boundaries
+  // Init map on mount — uses CARTO's free dark style, no token needed
+  useEffect(() => {
+    if (!mapContainer.current || map.current) return;
+
+    let instance: maplibregl.Map;
+    try {
+      instance = new maplibregl.Map({
+        container: mapContainer.current,
+        // CARTO dark style — free, no token required, no domain restrictions
+        style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        center: [-95.33, 29.75],
+        zoom: 10,
+        antialias: true,
+        failIfMajorPerformanceCaveat: false,
+      });
+    } catch (e) {
+      setInitError("WebGL is not available in this environment. Try opening the app in a full browser tab.");
+      return;
+    }
+
+    instance.on("error", (e) => {
+      console.error("[Map error]", e.error?.message ?? e);
+    });
+
+    instance.on("load", () => {
+      console.log("[Map] loaded");
+      instance.resize();
+      setMapReady(true);
+    });
+
+    instance.on("moveend", () => {
+      const c = instance.getCenter();
+      setCenter({ lat: c.lat, lng: c.lng });
+    });
+
+    instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+
+    // Resize after a small delay in case the container wasn't fully laid out
+    const t = setTimeout(() => instance.resize(), 500);
+    map.current = instance;
+
+    return () => {
+      clearTimeout(t);
+      instance.remove();
+      map.current = null;
+      setMapReady(false);
+    };
+  }, []);
+
+  // Step 2: data
   const { data: locationsData, isFetching } = useGetLocations(
     { lat: center.lat, long: center.lng, type: activeLayer as GetLocationsType },
     {
       query: {
         enabled: !!activeLayer && mapReady,
-        queryKey: getGetLocationsQueryKey({ lat: center.lat, long: center.lng, type: activeLayer as GetLocationsType }),
-      }
+        queryKey: getGetLocationsQueryKey({
+          lat: center.lat,
+          long: center.lng,
+          type: activeLayer as GetLocationsType,
+        }),
+      },
     }
   );
 
-  // Fetch token from API then initialize map
+  // Step 4: draw layers
   useEffect(() => {
-    if (map.current || !mapContainer.current) return;
+    const m = map.current;
+    if (!m || !mapReady) return;
 
-    if (!mapboxgl.supported()) {
-      setWebglError(true);
-      return;
-    }
+    const SRC = "bounds-src";
+    const FILL = "bounds-fill";
+    const LINE = "bounds-line";
 
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then(({ mapboxToken }: { mapboxToken: string }) => {
-        if (!mapboxToken) {
-          setWebglError(true);
-          return;
-        }
-
-        mapboxgl.accessToken = mapboxToken;
-
-        try {
-          const instance = new mapboxgl.Map({
-            container: mapContainer.current!,
-            style: "mapbox://styles/mapbox/dark-v11",
-            center: [center.lng, center.lat],
-            zoom: 10,
-            antialias: true,
-          });
-
-          instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
-
-          instance.on("moveend", () => {
-            const c = instance.getCenter();
-            setCenter({ lat: c.lat, lng: c.lng });
-          });
-
-          instance.on("load", () => {
-            setMapReady(true);
-          });
-
-          map.current = instance;
-        } catch {
-          setWebglError(true);
-        }
-      })
-      .catch(() => setWebglError(true));
-
-    return () => {
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
-      }
-    };
-  }, []);
-
-  // Update map layers when data changes
-  useEffect(() => {
-    if (!map.current || !mapReady) return;
-
-    const sourceId = "locations-source";
-    const fillLayerId = "locations-fill";
-    const lineLayerId = "locations-line";
-
-    // Remove previously added layers/source (no handlers to remove yet)
     const removeLayers = () => {
-      if (!map.current) return;
-      if (map.current.getLayer(fillLayerId)) map.current.removeLayer(fillLayerId);
-      if (map.current.getLayer(lineLayerId)) map.current.removeLayer(lineLayerId);
-      if (map.current.getSource(sourceId)) map.current.removeSource(sourceId);
+      if (m.getLayer(FILL)) m.removeLayer(FILL);
+      if (m.getLayer(LINE)) m.removeLayer(LINE);
+      if (m.getSource(SRC)) m.removeSource(SRC);
     };
 
     removeLayers();
 
     if (!activeLayer || !locationsData?.locations?.length) return;
 
-    const layerConfig = LAYER_CONFIG[activeLayer];
+    const { color, label } = LAYER_CONFIG[activeLayer];
 
     const features: GeoJSON.Feature[] = locationsData.locations
       .filter((loc) => loc.map?.polygon)
       .map((loc) => ({
         type: "Feature" as const,
         geometry: loc.map!.polygon as GeoJSON.Geometry,
-        properties: {
-          name: loc.name,
-          locationId: loc.locationId,
-          type: loc.type,
-        },
+        properties: { name: loc.name, locationId: loc.locationId },
       }));
 
-    if (features.length === 0) return;
+    if (!features.length) return;
 
-    map.current.addSource(sourceId, {
+    m.addSource(SRC, {
       type: "geojson",
       data: { type: "FeatureCollection", features },
       generateId: true,
     });
 
-    map.current.addLayer({
-      id: fillLayerId,
+    m.addLayer({
+      id: FILL,
       type: "fill",
-      source: sourceId,
+      source: SRC,
       paint: {
-        "fill-color": layerConfig.color,
+        "fill-color": color,
         "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.45, 0.2],
       },
     });
 
-    map.current.addLayer({
-      id: lineLayerId,
+    m.addLayer({
+      id: LINE,
       type: "line",
-      source: sourceId,
-      paint: {
-        "line-color": layerConfig.color,
-        "line-width": 1.5,
-      },
+      source: SRC,
+      paint: { "line-color": color, "line-width": 1.5 },
     });
 
-    const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: false });
+    const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false });
 
-    const onMouseEnter = (e: mapboxgl.MapLayerMouseEvent) => {
-      if (!map.current || !e.features?.length) return;
-      map.current.getCanvas().style.cursor = "pointer";
+    const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
+      if (!e.features?.length) return;
+      m.getCanvas().style.cursor = "pointer";
       const id = e.features[0].id;
-      setHoveredLocationId((prev) => {
-        if (prev !== null) map.current?.setFeatureState({ source: sourceId, id: prev }, { hover: false });
-        if (id !== undefined) map.current?.setFeatureState({ source: sourceId, id }, { hover: true });
+      setHoveredId((prev) => {
+        if (prev !== null) m.setFeatureState({ source: SRC, id: prev }, { hover: false });
+        if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: true });
         return id !== undefined ? String(id) : null;
       });
     };
 
-    const onMouseLeave = () => {
-      if (!map.current) return;
-      map.current.getCanvas().style.cursor = "";
-      setHoveredLocationId((prev) => {
-        if (prev !== null) map.current?.setFeatureState({ source: sourceId, id: prev }, { hover: false });
+    const onLeave = () => {
+      m.getCanvas().style.cursor = "";
+      setHoveredId((prev) => {
+        if (prev !== null) m.setFeatureState({ source: SRC, id: prev }, { hover: false });
         return null;
       });
     };
 
-    const onClick = (e: mapboxgl.MapLayerMouseEvent) => {
-      if (!e.features?.length || !map.current) return;
+    const onClick = (e: maplibregl.MapLayerMouseEvent) => {
+      if (!e.features?.length) return;
       const name = e.features[0].properties?.name ?? "";
       popup
         .setLngLat(e.lngLat)
         .setHTML(
-          `<div style="padding:10px;min-width:140px;color:#fff;background:#09090b;border-radius:6px;">` +
-          `<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#a1a1aa;margin-bottom:4px;">${layerConfig.label}</div>` +
-          `<div style="font-size:15px;font-weight:700;">${name}</div>` +
+          `<div style="padding:10px;min-width:150px;color:#f4f4f5;background:#09090b;border-radius:6px;">` +
+            `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#71717a;margin-bottom:4px;">${label}</div>` +
+            `<div style="font-size:14px;font-weight:700;">${name}</div>` +
           `</div>`
         )
-        .addTo(map.current);
+        .addTo(m);
     };
 
-    map.current.on("mouseenter", fillLayerId, onMouseEnter);
-    map.current.on("mouseleave", fillLayerId, onMouseLeave);
-    map.current.on("click", fillLayerId, onClick);
+    m.on("mouseenter", FILL, onEnter);
+    m.on("mouseleave", FILL, onLeave);
+    m.on("click", FILL, onClick);
 
     return () => {
       popup.remove();
-      if (map.current) {
-        map.current.off("mouseenter", fillLayerId, onMouseEnter);
-        map.current.off("mouseleave", fillLayerId, onMouseLeave);
-        map.current.off("click", fillLayerId, onClick);
-      }
+      m.off("mouseenter", FILL, onEnter);
+      m.off("mouseleave", FILL, onLeave);
+      m.off("click", FILL, onClick);
       removeLayers();
     };
   }, [locationsData, activeLayer, mapReady]);
 
-  // Popup dark styles
+  // Popup styles
   useEffect(() => {
     const style = document.createElement("style");
     style.textContent = `
-      .mapboxgl-popup-content { background:#09090b !important; border:1px solid #27272a; border-radius:6px; padding:0; box-shadow:0 4px 16px rgb(0 0 0 / .6); }
-      .mapboxgl-popup-tip { display:none; }
-      .mapboxgl-popup-close-button { color:#71717a; font-size:18px; padding:4px 8px; line-height:1; }
-      .mapboxgl-popup-close-button:hover { color:#fff; background:transparent; }
+      .maplibregl-popup-content { background:#09090b !important; border:1px solid #27272a; border-radius:6px; padding:0; box-shadow:0 8px 24px rgb(0 0 0/.7); }
+      .maplibregl-popup-tip { display:none; }
+      .maplibregl-popup-close-button { color:#71717a; font-size:18px; padding:2px 8px; line-height:1; }
+      .maplibregl-popup-close-button:hover { color:#fff; background:transparent; }
     `;
     document.head.appendChild(style);
     return () => document.head.removeChild(style);
   }, []);
 
-  if (webglError) {
+  if (initError) {
     return (
-      <div className="w-full h-[100dvh] bg-zinc-950 flex items-center justify-center">
+      <div className="w-full h-screen bg-zinc-950 flex items-center justify-center">
         <div className="text-center max-w-sm px-6">
-          <Layers className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
-          <h1 className="text-lg font-semibold text-zinc-200 mb-2">Map unavailable</h1>
-          <p className="text-sm text-zinc-400">
-            WebGL is required to render the map. Try opening this app in a standalone browser tab.
-          </p>
+          <Layers className="w-10 h-10 text-zinc-600 mx-auto mb-4" />
+          <h1 className="text-base font-semibold text-zinc-200 mb-2">Map could not load</h1>
+          <p className="text-sm text-zinc-500">{initError}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="relative w-full h-[100dvh] bg-zinc-950 overflow-hidden">
-      <div ref={mapContainer} className="absolute inset-0" />
+    <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden", background: "#09090b" }}>
+      <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
 
-      {/* Floating UI */}
-      <div className="absolute top-4 left-4 z-10 flex flex-col gap-3">
-        {/* Title */}
+      <div style={{ position: "absolute", top: 16, left: 16, zIndex: 10, display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Header */}
         <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-4 py-3 rounded-lg shadow-xl flex items-center gap-3">
-          <div className="bg-zinc-800 p-1.5 rounded-md text-zinc-300">
-            <Layers className="w-4 h-4" />
+          <div className="bg-zinc-800 p-1.5 rounded-md">
+            <Layers className="w-4 h-4 text-zinc-300" />
           </div>
           <div>
             <h1 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">Boundary Explorer</h1>
-            <p className="text-xs text-zinc-500">Select a layer to display boundaries</p>
+            <p className="text-xs text-zinc-500">Select a layer below</p>
           </div>
         </div>
 
         {/* Layer buttons */}
-        <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-2 rounded-lg shadow-xl flex flex-col gap-1 w-52">
-          <div className="px-2 py-1 flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-zinc-500 uppercase tracking-widest">Layer</span>
+        <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-2 rounded-lg shadow-xl w-52">
+          <div className="px-2 py-1 flex items-center justify-between mb-1">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Layer</span>
             {isFetching && <Loader2 className="w-3.5 h-3.5 text-zinc-500 animate-spin" />}
           </div>
 
-          {(Object.entries(LAYER_CONFIG) as [NonNullable<LayerType>, typeof LAYER_CONFIG.area][]).map(([key, config]) => {
+          {(Object.entries(LAYER_CONFIG) as [NonNullable<LayerType>, typeof LAYER_CONFIG.area][]).map(([key, { label, color }]) => {
             const isActive = activeLayer === key;
             return (
               <button
@@ -259,20 +244,25 @@ export default function MapExplorer() {
                 onClick={() => setActiveLayer(isActive ? null : key)}
                 className={
                   "flex items-center gap-2.5 w-full px-3 py-2 text-sm font-medium rounded-md transition-colors " +
-                  (isActive
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")
+                  (isActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")
                 }
               >
                 <span
                   className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                  style={{ backgroundColor: isActive ? config.color : "transparent", border: "1.5px solid " + config.color }}
+                  style={{ backgroundColor: isActive ? color : "transparent", border: "1.5px solid " + color }}
                 />
-                {config.label}
+                {label}
               </button>
             );
           })}
         </div>
+
+        {!mapReady && !initError && (
+          <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-3 py-2 rounded-lg flex items-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 text-zinc-500 animate-spin" />
+            <span className="text-xs text-zinc-500">Loading map…</span>
+          </div>
+        )}
       </div>
     </div>
   );
