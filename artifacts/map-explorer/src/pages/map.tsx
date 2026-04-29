@@ -95,19 +95,17 @@ export default function MapExplorer() {
     const fillLayerId = "locations-fill";
     const lineLayerId = "locations-line";
 
-    const cleanup = () => {
+    // Remove previously added layers/source (no handlers to remove yet)
+    const removeLayers = () => {
       if (!map.current) return;
-      map.current.off("mouseenter", fillLayerId, onMouseEnter);
-      map.current.off("mouseleave", fillLayerId, onMouseLeave);
-      map.current.off("click", fillLayerId, onClick);
       if (map.current.getLayer(fillLayerId)) map.current.removeLayer(fillLayerId);
       if (map.current.getLayer(lineLayerId)) map.current.removeLayer(lineLayerId);
       if (map.current.getSource(sourceId)) map.current.removeSource(sourceId);
     };
 
-    cleanup();
+    removeLayers();
 
-    if (!activeLayer || !locationsData?.locations?.length) return cleanup;
+    if (!activeLayer || !locationsData?.locations?.length) return;
 
     const layerConfig = LAYER_CONFIG[activeLayer];
 
@@ -123,7 +121,7 @@ export default function MapExplorer() {
         },
       }));
 
-    if (features.length === 0) return cleanup;
+    if (features.length === 0) return;
 
     map.current.addSource(sourceId, {
       type: "geojson",
@@ -151,42 +149,37 @@ export default function MapExplorer() {
       },
     });
 
-    const popup = new mapboxgl.Popup({
-      closeButton: true,
-      closeOnClick: false,
-    });
+    const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: false });
 
     const onMouseEnter = (e: mapboxgl.MapLayerMouseEvent) => {
       if (!map.current || !e.features?.length) return;
       map.current.getCanvas().style.cursor = "pointer";
       const id = e.features[0].id;
-      if (hoveredLocationId !== null) {
-        map.current.setFeatureState({ source: sourceId, id: hoveredLocationId }, { hover: false });
-      }
-      setHoveredLocationId(String(id));
-      map.current.setFeatureState({ source: sourceId, id: id! }, { hover: true });
+      setHoveredLocationId((prev) => {
+        if (prev !== null) map.current?.setFeatureState({ source: sourceId, id: prev }, { hover: false });
+        if (id !== undefined) map.current?.setFeatureState({ source: sourceId, id }, { hover: true });
+        return id !== undefined ? String(id) : null;
+      });
     };
 
     const onMouseLeave = () => {
       if (!map.current) return;
       map.current.getCanvas().style.cursor = "";
       setHoveredLocationId((prev) => {
-        if (prev !== null) {
-          map.current?.setFeatureState({ source: sourceId, id: prev }, { hover: false });
-        }
+        if (prev !== null) map.current?.setFeatureState({ source: sourceId, id: prev }, { hover: false });
         return null;
       });
     };
 
     const onClick = (e: mapboxgl.MapLayerMouseEvent) => {
       if (!e.features?.length || !map.current) return;
-      const feature = e.features[0];
+      const name = e.features[0].properties?.name ?? "";
       popup
         .setLngLat(e.lngLat)
         .setHTML(
           `<div style="padding:10px;min-width:140px;color:#fff;background:#09090b;border-radius:6px;">` +
           `<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#a1a1aa;margin-bottom:4px;">${layerConfig.label}</div>` +
-          `<div style="font-size:15px;font-weight:700;">${feature.properties?.name ?? ""}</div>` +
+          `<div style="font-size:15px;font-weight:700;">${name}</div>` +
           `</div>`
         )
         .addTo(map.current);
@@ -198,7 +191,12 @@ export default function MapExplorer() {
 
     return () => {
       popup.remove();
-      cleanup();
+      if (map.current) {
+        map.current.off("mouseenter", fillLayerId, onMouseEnter);
+        map.current.off("mouseleave", fillLayerId, onMouseLeave);
+        map.current.off("click", fillLayerId, onClick);
+      }
+      removeLayers();
     };
   }, [locationsData, activeLayer, mapReady]);
 
