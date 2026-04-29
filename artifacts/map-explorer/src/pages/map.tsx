@@ -24,6 +24,25 @@ type SelectedLocation = {
   demographics: Demographics;
 };
 
+// Flatten any depth of coordinate arrays to extract [lng, lat] pairs
+function flatCoords(arr: unknown[]): number[][] {
+  if (arr.length === 0) return [];
+  if (typeof arr[0] === "number") return [arr as number[]];
+  return (arr as unknown[][]).flatMap(flatCoords);
+}
+
+function getBbox(boundary: number[][][] | number[][][][]): maplibregl.LngLatBoundsLike {
+  const coords = flatCoords(boundary as unknown[]);
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+  for (const [lng, lat] of coords) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  return [[minLng, minLat], [maxLng, maxLat]];
+}
+
 export default function MapExplorer() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -33,6 +52,9 @@ export default function MapExplorer() {
   const [styleReady, setStyleReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
+  // Refs used inside stable event-handler closures
+  const selectedRef = useRef<SelectedLocation | null>(null);
+  const locationsRef = useRef<any[]>([]);
 
   // Step 1: init map
   useEffect(() => {
@@ -66,6 +88,8 @@ export default function MapExplorer() {
     });
 
     instance.on("moveend", () => {
+      // Don't re-fetch while a boundary is selected — user may be panning/zooming
+      if (selectedRef.current) return;
       const c = instance.getCenter();
       setCenter({ lat: c.lat, lng: c.lng });
     });
@@ -217,7 +241,11 @@ export default function MapExplorer() {
     };
   }, [locationsData, activeLayer, mapReady, styleReady]);
 
-  // Step 4: isolate selected boundary — filter + fill opacity
+  // Keep refs in sync so stable closures (moveend) can read current values
+  useEffect(() => { selectedRef.current = selectedLocation; }, [selectedLocation]);
+  useEffect(() => { locationsRef.current = locationsData?.locations ?? []; }, [locationsData]);
+
+  // Step 4: isolate selected boundary — filter + fill opacity + fit bounds
   useEffect(() => {
     const m = map.current;
     if (!m || !styleReady) return;
@@ -228,6 +256,17 @@ export default function MapExplorer() {
         m.setFilter(FILL, f);
         m.setFilter(LINE, f);
         m.setPaintProperty(FILL, "fill-opacity", 0.1);
+
+        // Fit map to selected boundary (leave room for drawer on the right)
+        const loc = locationsRef.current.find((l) => l.locationId === selectedLocation.locationId);
+        if (loc?.map?.boundary) {
+          const bbox = getBbox(loc.map.boundary);
+          m.fitBounds(bbox, {
+            padding: { top: 80, bottom: 80, left: 80, right: 420 },
+            maxZoom: 14,
+            duration: 600,
+          });
+        }
       } else {
         m.setFilter(FILL, null);
         m.setFilter(LINE, null);
