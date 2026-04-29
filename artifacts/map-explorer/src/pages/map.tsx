@@ -419,54 +419,42 @@ export default function MapExplorer() {
 
     clearListingLayers();
 
-    if (!m.isStyleLoaded()) {
-      setListingsLoading(false);
-      // retry once the style finishes loading
-      const onReady = () => { if (m.isStyleLoaded()) setListingStyleRetry((n) => n + 1); };
-      m.once("styledata", onReady);
-      return () => { m.off("styledata", onReady); };
-    }
-
     const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
 
     try {
-    m.addSource(LISTINGS_SRC, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
-    });
-
-    m.addLayer({
-      id: LISTINGS_DOT,
-      type: "circle",
-      source: LISTINGS_SRC,
-      paint: {
-        "circle-color": color,
-        "circle-radius": 6,
-        "circle-opacity": 0.88,
-        "circle-stroke-width": 1.5,
-        "circle-stroke-color": "rgba(0,0,0,0.6)",
-      },
-    });
-
-    m.addLayer({
-      id: LISTINGS_BLOOM,
-      type: "circle",
-      source: LISTINGS_SRC,
-      filter: ["==", ["get", "batchId"], -1],
-      paint: {
-        "circle-color": color,
-        "circle-radius": 6,
-        "circle-opacity": 0,
-        "circle-stroke-width": 0,
-      },
-    });
+      m.addSource(LISTINGS_SRC, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      m.addLayer({
+        id: LISTINGS_DOT,
+        type: "circle",
+        source: LISTINGS_SRC,
+        paint: {
+          "circle-color": color,
+          "circle-radius": 6,
+          "circle-opacity": 0.88,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "rgba(0,0,0,0.6)",
+        },
+      });
+      m.addLayer({
+        id: LISTINGS_BLOOM,
+        type: "circle",
+        source: LISTINGS_SRC,
+        filter: ["==", ["get", "batchId"], -1],
+        paint: {
+          "circle-color": color,
+          "circle-radius": 6,
+          "circle-opacity": 0,
+          "circle-stroke-width": 0,
+        },
+      });
     } catch (e) {
-      console.warn("[Map] Failed to add listing layers:", e);
+      console.warn("[Map] Style not ready for listing layers, retrying…", e);
       setListingsLoading(false);
-      // style wasn't ready — retry when it settles
-      const onReady = () => { if (m.isStyleLoaded()) setListingStyleRetry((n) => n + 1); };
-      m.once("styledata", onReady);
-      return;
+      const timer = setTimeout(() => setListingStyleRetry((n) => n + 1), 200);
+      return () => clearTimeout(timer);
     }
 
     let allFeatures: GeoJSON.Feature[] = [];
