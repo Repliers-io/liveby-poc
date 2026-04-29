@@ -13,7 +13,8 @@ const LISTINGS_SRC = "listings-src";
 const LISTINGS_DOT = "listings-dot";
 const LISTINGS_BLOOM = "listings-bloom";
 const LISTINGS_CONCURRENCY = 4;
-const MAX_LISTING_PAGES = 50; // ~5,000 listings cap
+const MAX_MAP_POINTS = 300;
+const RESULTS_PER_PAGE = 100;
 
 const PRICE_RANGES = [
   { key: "lt500k",   label: "<500K",   min: null,    max: 500000  },
@@ -492,9 +493,13 @@ export default function MapExplorer() {
 
     const addBatch = (listings: RawListing[]) => {
       if (listingsSessionRef.current !== session) return;
+      if (allFeatures.length >= MAX_MAP_POINTS) return;
+
       const batchNum = ++listingsBatchRef.current;
+      const room = MAX_MAP_POINTS - allFeatures.length;
 
       const newFeatures: GeoJSON.Feature[] = listings
+        .slice(0, room)
         .filter((l) => l.map?.latitude && l.map?.longitude)
         .map((l) => ({
           type: "Feature" as const,
@@ -514,7 +519,7 @@ export default function MapExplorer() {
       const params = new URLSearchParams({
         locationId: selectedLocation.locationId,
         pageNum: String(pageNum),
-        resultsPerPage: "100",
+        resultsPerPage: String(RESULTS_PER_PAGE),
       });
       if (listingFilters.listingType) params.set("type", listingFilters.listingType);
       if (listingFilters.minBeds !== null) params.set("minBeds", String(listingFilters.minBeds));
@@ -538,20 +543,19 @@ export default function MapExplorer() {
       const first = await fetchPage(1);
       if (listingsSessionRef.current !== session) return;
 
+      const totalCount = first.count; // real Repliers total — never changes
       addBatch(first.listings);
-      const totalPages = Math.min(first.numPages, MAX_LISTING_PAGES);
-      const totalCount = first.count;
-      setListingCount({ loaded: first.listings.length, total: totalCount });
+      // Surface the real total immediately so it's always visible
+      setListingCount({ loaded: allFeatures.length, total: totalCount });
 
-      let loaded = first.listings.length;
+      const totalPages = first.numPages;
 
-      for (let page = 2; page <= totalPages; page += LISTINGS_CONCURRENCY) {
+      for (let page = 2; page <= totalPages && allFeatures.length < MAX_MAP_POINTS; page += LISTINGS_CONCURRENCY) {
         if (listingsSessionRef.current !== session) return;
 
-        const batch = Array.from(
-          { length: Math.min(LISTINGS_CONCURRENCY, totalPages - page + 1) },
-          (_, i) => page + i
-        );
+        const pagesStillNeeded = Math.ceil((MAX_MAP_POINTS - allFeatures.length) / RESULTS_PER_PAGE);
+        const batchSize = Math.min(LISTINGS_CONCURRENCY, pagesStillNeeded, totalPages - page + 1);
+        const batch = Array.from({ length: batchSize }, (_, i) => page + i);
 
         const results = await Promise.allSettled(batch.map(fetchPage));
 
@@ -559,8 +563,7 @@ export default function MapExplorer() {
           if (listingsSessionRef.current !== session) return;
           if (r.status === "fulfilled") {
             addBatch(r.value.listings);
-            loaded += r.value.listings.length;
-            setListingCount({ loaded, total: totalCount });
+            setListingCount({ loaded: allFeatures.length, total: totalCount });
           }
         }
 
@@ -711,14 +714,16 @@ export default function MapExplorer() {
                     <Loader2 className="w-3 h-3 text-zinc-500 animate-spin flex-shrink-0" />
                     <span className="text-xs text-zinc-400 truncate">
                       {listingCount
-                        ? `${listingCount.loaded.toLocaleString()} / ${listingCount.total.toLocaleString()}`
+                        ? <><span className="text-zinc-200 font-medium">{listingCount.total.toLocaleString()}</span>{" listings"}</>
                         : "Loading…"}
                     </span>
                   </div>
                 ) : listingCount ? (
                   <span className="text-xs text-zinc-400">
-                    <span className="text-zinc-200 font-medium">{listingCount.loaded.toLocaleString()}</span>
-                    {listingCount.total > listingCount.loaded && <> of {listingCount.total.toLocaleString()}</>}
+                    {listingCount.loaded < listingCount.total
+                      ? <><span className="text-zinc-200 font-medium">Showing {listingCount.loaded.toLocaleString()}</span>{" of "}{listingCount.total.toLocaleString()}</>
+                      : <span className="text-zinc-200 font-medium">{listingCount.total.toLocaleString()}</span>
+                    }
                     {" listings"}
                   </span>
                 ) : (
