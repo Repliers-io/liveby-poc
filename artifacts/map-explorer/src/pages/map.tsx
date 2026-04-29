@@ -15,6 +15,29 @@ const LISTINGS_BLOOM = "listings-bloom";
 const LISTINGS_CONCURRENCY = 4;
 const MAX_LISTING_PAGES = 50; // ~5,000 listings cap
 
+const PRICE_RANGES = [
+  { key: "lt500k",   label: "<500K",   min: null,    max: 500000  },
+  { key: "500k1m",   label: "500K-1M", min: 500000,  max: 1000000 },
+  { key: "1m1.5m",   label: "1M-1.5M", min: 1000000, max: 1500000 },
+  { key: "gt1.5m",   label: "1.5M+",   min: 1500000, max: null    },
+] as const;
+
+type PriceKey = typeof PRICE_RANGES[number]["key"];
+
+type ListingFilters = {
+  listingType: "Sale" | "Lease" | null;
+  minBeds: number | null;
+  minBaths: number | null;
+  priceKey: PriceKey | null;
+};
+
+const DEFAULT_FILTERS: ListingFilters = {
+  listingType: null,
+  minBeds: null,
+  minBaths: null,
+  priceKey: null,
+};
+
 type LayerType = "area" | "city" | "neighborhood" | "school" | null;
 
 const LAYER_CONFIG = {
@@ -64,6 +87,7 @@ export default function MapExplorer() {
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
   const [listingCount, setListingCount] = useState<{ loaded: number; total: number } | null>(null);
   const [listingsLoading, setListingsLoading] = useState(false);
+  const [listingFilters, setListingFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
   // Refs used inside stable event-handler closures
   const selectedRef = useRef<SelectedLocation | null>(null);
   const locationsRef = useRef<any[]>([]);
@@ -458,9 +482,18 @@ export default function MapExplorer() {
     };
 
     const fetchPage = async (pageNum: number): Promise<{ listings: RawListing[]; numPages: number; count: number }> => {
-      const res = await fetch(
-        `/api/listings?locationId=${encodeURIComponent(selectedLocation.locationId)}&pageNum=${pageNum}&resultsPerPage=100`
-      );
+      const params = new URLSearchParams({
+        locationId: selectedLocation.locationId,
+        pageNum: String(pageNum),
+        resultsPerPage: "100",
+      });
+      if (listingFilters.listingType) params.set("type", listingFilters.listingType);
+      if (listingFilters.minBeds !== null) params.set("minBeds", String(listingFilters.minBeds));
+      if (listingFilters.minBaths !== null) params.set("minBaths", String(listingFilters.minBaths));
+      const priceRange = listingFilters.priceKey ? PRICE_RANGES.find((r) => r.key === listingFilters.priceKey) : null;
+      if (priceRange?.min !== null && priceRange?.min !== undefined) params.set("minPrice", String(priceRange.min));
+      if (priceRange?.max !== null && priceRange?.max !== undefined) params.set("maxPrice", String(priceRange.max));
+      const res = await fetch(`/api/listings?${params}`);
       if (!res.ok) throw new Error(`listings fetch failed: ${res.status}`);
       return res.json();
     };
@@ -514,7 +547,7 @@ export default function MapExplorer() {
       setListingCount(null);
       setListingsLoading(false);
     };
-  }, [selectedLocation, styleReady, mapReady, activeLayer]);
+  }, [selectedLocation, styleReady, mapReady, activeLayer, listingFilters]);
 
   // Popup CSS (just for popups we may add later — kept as baseline)
   useEffect(() => {
@@ -602,29 +635,121 @@ export default function MapExplorer() {
           </button>
         )}
 
-        {selectedLocation && (listingsLoading || listingCount) && (
-          <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-3 py-2.5 rounded-lg flex items-center gap-2 w-52">
-            <Home className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
-            {listingsLoading ? (
-              <div className="flex items-center gap-2 min-w-0">
-                <Loader2 className="w-3 h-3 text-zinc-500 animate-spin flex-shrink-0" />
-                <span className="text-xs text-zinc-400 truncate">
-                  {listingCount
-                    ? `${listingCount.loaded.toLocaleString()} / ${listingCount.total.toLocaleString()} listings`
-                    : "Loading listings…"}
-                </span>
+        {selectedLocation && (() => {
+          const color = layerCfg?.color ?? "#10B981";
+          const btnBase = "text-[10px] font-medium py-1 rounded transition-colors border ";
+          const btnOff = btnBase + "text-zinc-500 bg-zinc-900 border-zinc-800 hover:text-zinc-300 hover:border-zinc-600";
+          const btnOn  = (c: string) => btnBase + `text-zinc-100 border-transparent` + ` bg-[${c}]/20 border-[${c}]`;
+          const filterBtn = (active: boolean, c: string) => active ? btnOn(c) : btnOff;
+
+          const setType = (t: "Sale" | "Lease") =>
+            setListingFilters((f) => ({ ...f, listingType: f.listingType === t ? null : t }));
+          const setBeds = (n: number) =>
+            setListingFilters((f) => ({ ...f, minBeds: f.minBeds === n ? null : n }));
+          const setBaths = (n: number) =>
+            setListingFilters((f) => ({ ...f, minBaths: f.minBaths === n ? null : n }));
+          const setPrice = (k: PriceKey) =>
+            setListingFilters((f) => ({ ...f, priceKey: f.priceKey === k ? null : k }));
+
+          return (
+            <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 rounded-lg w-52 overflow-hidden">
+              {/* Count header */}
+              <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-800/60">
+                <Home className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
+                {listingsLoading ? (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Loader2 className="w-3 h-3 text-zinc-500 animate-spin flex-shrink-0" />
+                    <span className="text-xs text-zinc-400 truncate">
+                      {listingCount
+                        ? `${listingCount.loaded.toLocaleString()} / ${listingCount.total.toLocaleString()}`
+                        : "Loading…"}
+                    </span>
+                  </div>
+                ) : listingCount ? (
+                  <span className="text-xs text-zinc-400">
+                    <span className="text-zinc-200 font-medium">{listingCount.loaded.toLocaleString()}</span>
+                    {listingCount.total > listingCount.loaded && <> of {listingCount.total.toLocaleString()}</>}
+                    {" listings"}
+                  </span>
+                ) : (
+                  <span className="text-xs text-zinc-500">Listings</span>
+                )}
               </div>
-            ) : listingCount ? (
-              <span className="text-xs text-zinc-400">
-                <span className="text-zinc-200 font-medium">{listingCount.loaded.toLocaleString()}</span>
-                {listingCount.total > listingCount.loaded && (
-                  <> of {listingCount.total.toLocaleString()}</>
-                )}{" "}
-                listings
-              </span>
-            ) : null}
-          </div>
-        )}
+
+              <div className="px-3 py-2.5 flex flex-col gap-2.5">
+                {/* Type */}
+                <div>
+                  <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Type</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(["Sale", "Lease"] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setType(t)}
+                        className={filterBtn(listingFilters.listingType === t, color)}
+                        style={listingFilters.listingType === t ? { backgroundColor: color + "33", borderColor: color, color: "#f4f4f5" } : undefined}
+                      >{t}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Beds */}
+                <div>
+                  <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Beds</p>
+                  <div className="grid grid-cols-4 gap-1">
+                    {[1, 2, 3, 4].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setBeds(n)}
+                        className={filterBtn(listingFilters.minBeds === n, color)}
+                        style={listingFilters.minBeds === n ? { backgroundColor: color + "33", borderColor: color, color: "#f4f4f5" } : undefined}
+                      >{n}+</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Baths */}
+                <div>
+                  <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Baths</p>
+                  <div className="grid grid-cols-4 gap-1">
+                    {[1, 2, 3, 4].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setBaths(n)}
+                        className={filterBtn(listingFilters.minBaths === n, color)}
+                        style={listingFilters.minBaths === n ? { backgroundColor: color + "33", borderColor: color, color: "#f4f4f5" } : undefined}
+                      >{n}+</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Price */}
+                <div>
+                  <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Price</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {PRICE_RANGES.map((r) => (
+                      <button
+                        key={r.key}
+                        onClick={() => setPrice(r.key)}
+                        className={filterBtn(listingFilters.priceKey === r.key, color)}
+                        style={listingFilters.priceKey === r.key ? { backgroundColor: color + "33", borderColor: color, color: "#f4f4f5" } : undefined}
+                      >{r.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Clear filters */}
+                {(listingFilters.listingType || listingFilters.minBeds || listingFilters.minBaths || listingFilters.priceKey) && (
+                  <button
+                    onClick={() => setListingFilters(DEFAULT_FILTERS)}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors text-left"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Demographics drawer */}

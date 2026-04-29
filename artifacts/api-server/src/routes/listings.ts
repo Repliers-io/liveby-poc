@@ -10,6 +10,11 @@ router.get("/listings", async (req, res) => {
     locationId,
     pageNum = "1",
     resultsPerPage = "100",
+    type,
+    minBeds,
+    minBaths,
+    minPrice,
+    maxPrice,
   } = req.query as Record<string, string>;
 
   if (!locationId) {
@@ -29,6 +34,11 @@ router.get("/listings", async (req, res) => {
   url.searchParams.set("pageNum", pageNum);
   url.searchParams.set("resultsPerPage", resultsPerPage);
   url.searchParams.set("fields", LISTING_FIELDS);
+  if (type) url.searchParams.set("type", type);
+  if (minBeds) url.searchParams.set("minBeds", minBeds);
+  if (minBaths) url.searchParams.set("minBaths", minBaths);
+  if (minPrice) url.searchParams.set("minPrice", minPrice);
+  if (maxPrice) url.searchParams.set("maxPrice", maxPrice);
 
   try {
     const response = await fetch(url.toString(), {
