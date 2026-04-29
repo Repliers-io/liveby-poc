@@ -5,7 +5,7 @@ import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@wor
 import { Loader2, Layers } from "lucide-react";
 
 // Mapbox Token
-mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
+mapboxgl.accessToken = import.meta.env.MAPBOX_TOKEN as string;
 
 type LayerType = "area" | "city" | "neighborhood" | "school" | null;
 

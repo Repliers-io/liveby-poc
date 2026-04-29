@@ -28,9 +28,7 @@ if (!basePath) {
 
 export default defineConfig({
   base: basePath,
-  define: {
-    'import.meta.env.VITE_MAPBOX_TOKEN': JSON.stringify(process.env.MAPBOX_TOKEN)
-  },
+  envPrefix: ["VITE_", "MAPBOX_"],
   plugins: [
     react(),
     tailwindcss(),
