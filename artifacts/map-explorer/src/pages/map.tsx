@@ -244,22 +244,28 @@ export default function MapExplorer() {
       clearHover();
       hoveredId = e.features[0].id;
       if (hoveredId !== undefined) m.setFeatureState({ source: SRC, id: hoveredId }, { hover: true });
+      if (selectedRef.current) return;
       const name = (e.features[0].properties as { name: string }).name;
       tooltip.setLngLat(e.lngLat).setHTML(`<span>${name}</span>`).addTo(m);
     };
 
     const onMove = (e: maplibregl.MapLayerMouseEvent) => {
       if (!e.features?.length) return;
-      tooltip.setLngLat(e.lngLat);
       const newId = e.features[0].id;
-      // If we've crossed into a different feature, update hover state and tooltip text
       if (newId !== hoveredId) {
         clearHover();
         hoveredId = newId;
         if (hoveredId !== undefined) m.setFeatureState({ source: SRC, id: hoveredId }, { hover: true });
-        const name = (e.features[0].properties as { name: string }).name;
-        tooltip.setHTML(`<span>${name}</span>`);
+        if (!selectedRef.current) {
+          const name = (e.features[0].properties as { name: string }).name;
+          tooltip.setHTML(`<span>${name}</span>`);
+        }
       }
+      if (selectedRef.current) {
+        tooltip.remove();
+        return;
+      }
+      tooltip.setLngLat(e.lngLat);
     };
 
     const onLeave = () => {
