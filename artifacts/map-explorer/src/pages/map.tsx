@@ -6,12 +6,7 @@ import { Loader2, Layers, Home } from "lucide-react";
 import DemographicsDrawer, { Demographics } from "../components/DemographicsDrawer";
 
 type RawListing = {
-  mlsNumber: string;
-  status: string;
-  listPrice: number;
   map: { latitude: number; longitude: number };
-  address: { streetNumber: string; streetName: string; streetSuffix?: string; city: string; state: string };
-  details?: { numBedrooms?: number; numBathrooms?: number; propertyType?: string; sqft?: number };
 };
 
 const LISTINGS_SRC = "listings-src";
@@ -392,13 +387,7 @@ export default function MapExplorer() {
       type: "circle",
       source: LISTINGS_SRC,
       paint: {
-        "circle-color": [
-          "match", ["get", "status"],
-          "A", color,
-          "U", "#FBBF24",
-          "S", "#6B7280",
-          "#9CA3AF",
-        ],
+        "circle-color": color,
         "circle-radius": 6,
         "circle-opacity": 0.88,
         "circle-stroke-width": 1.5,
@@ -457,15 +446,7 @@ export default function MapExplorer() {
         .map((l) => ({
           type: "Feature" as const,
           geometry: { type: "Point" as const, coordinates: [l.map.longitude, l.map.latitude] },
-          properties: {
-            mlsNumber: l.mlsNumber,
-            listPrice: l.listPrice,
-            status: l.status,
-            batchId: batchNum,
-            beds: l.details?.numBedrooms ?? 0,
-            baths: l.details?.numBathrooms ?? 0,
-            propertyType: l.details?.propertyType ?? "",
-          },
+          properties: { batchId: batchNum },
         }));
 
       allFeatures = allFeatures.concat(newFeatures);
