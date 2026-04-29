@@ -215,11 +215,25 @@ export default function MapExplorer() {
       return;
     }
 
+    const tooltip = new maplibregl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      offset: [0, -4],
+      className: "boundary-tooltip",
+      maxWidth: "240px",
+    });
+
     const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
       if (!e.features?.length) return;
       m.getCanvas().style.cursor = "pointer";
       const id = e.features[0].id;
       if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: true });
+      const name = (e.features[0].properties as { name: string }).name;
+      tooltip.setLngLat(e.lngLat).setHTML(`<span>${name}</span>`).addTo(m);
+    };
+
+    const onMove = (e: maplibregl.MapLayerMouseEvent) => {
+      if (tooltip.isOpen()) tooltip.setLngLat(e.lngLat);
     };
 
     const onLeave = (e: maplibregl.MapLayerMouseEvent) => {
@@ -228,10 +242,12 @@ export default function MapExplorer() {
         const id = e.features[0].id;
         if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: false });
       }
+      tooltip.remove();
     };
 
     const onClick = (e: maplibregl.MapLayerMouseEvent) => {
       if (!e.features?.length) return;
+      tooltip.remove();
       const props = e.features[0].properties as {
         name: string;
         locationId: string;
@@ -245,13 +261,16 @@ export default function MapExplorer() {
     };
 
     m.on("mouseenter", FILL, onEnter);
+    m.on("mousemove", FILL, onMove);
     m.on("mouseleave", FILL, onLeave);
     m.on("click", FILL, onClick);
 
     return () => {
       m.off("mouseenter", FILL, onEnter);
+      m.off("mousemove", FILL, onMove);
       m.off("mouseleave", FILL, onLeave);
       m.off("click", FILL, onClick);
+      tooltip.remove();
       removeLayers();
     };
   }, [activeLayer, mapReady, styleReady]);
@@ -555,6 +574,20 @@ export default function MapExplorer() {
     style.textContent = `
       .maplibregl-popup-content { background:#09090b !important; border:1px solid #27272a; border-radius:6px; padding:0; box-shadow:0 8px 24px rgb(0 0 0/.7); }
       .maplibregl-popup-tip { display:none; }
+      .boundary-tooltip .maplibregl-popup-content {
+        padding: 5px 10px;
+        background: rgba(9,9,11,0.92) !important;
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        box-shadow: 0 4px 16px rgb(0 0 0/.6);
+        pointer-events: none;
+      }
+      .boundary-tooltip .maplibregl-popup-content span {
+        font-size: 12px;
+        font-weight: 500;
+        color: #e4e4e7;
+        white-space: nowrap;
+      }
     `;
     document.head.appendChild(style);
     return () => { document.head.removeChild(style); };
