@@ -74,6 +74,7 @@ export default function MapExplorer() {
   const locationsRef = useRef<any[]>([]);
   const listingsSessionRef = useRef(0);
   const listingsBatchRef = useRef(0);
+  const layerJustChangedRef = useRef(false);
 
   // Step 1: init map
   useEffect(() => {
@@ -157,6 +158,9 @@ export default function MapExplorer() {
 
     removeLayers();
     if (!activeLayer) return;
+
+    // Signal Step 3b to fit bounds on the first data load for this layer
+    layerJustChangedRef.current = true;
 
     const { color } = LAYER_CONFIG[activeLayer];
 
@@ -263,6 +267,25 @@ export default function MapExplorer() {
       });
 
     src.setData({ type: "FeatureCollection", features });
+
+    // Fit to all boundaries on the first data load after a layer change
+    if (layerJustChangedRef.current && features.length > 0) {
+      layerJustChangedRef.current = false;
+      const allCoords = features.flatMap((f) => {
+        const g = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+        return flatCoords(g.coordinates as unknown[]);
+      });
+      if (allCoords.length > 0) {
+        let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+        for (const [lng, lat] of allCoords) {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }
+        m.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 600 });
+      }
+    }
   }, [locationsData, styleReady]);
 
   // Keep refs in sync so stable closures (moveend) can read current values
