@@ -3,6 +3,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@workspace/api-client-react";
 import { Loader2, Layers } from "lucide-react";
+import DemographicsDrawer, { Demographics } from "../components/DemographicsDrawer";
 
 type LayerType = "area" | "city" | "neighborhood" | "school" | null;
 
@@ -13,17 +14,27 @@ const LAYER_CONFIG = {
   school: { label: "Schools", color: "#8B5CF6" },
 };
 
+const SRC = "bounds-src";
+const FILL = "bounds-fill";
+const LINE = "bounds-line";
+
+type SelectedLocation = {
+  name: string;
+  locationId: string;
+  demographics: Demographics;
+};
+
 export default function MapExplorer() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [center, setCenter] = useState<{ lat: number; lng: number }>({ lat: 29.75, lng: -95.33 });
   const [activeLayer, setActiveLayer] = useState<LayerType>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [styleReady, setStyleReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
 
-  // Init map on mount — uses CARTO's free dark style, no token needed
+  // Step 1: init map
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
@@ -31,24 +42,20 @@ export default function MapExplorer() {
     try {
       instance = new maplibregl.Map({
         container: mapContainer.current,
-        // CARTO dark style — free, no token required, no domain restrictions
         style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
         center: [-95.33, 29.75],
         zoom: 10,
         antialias: true,
         failIfMajorPerformanceCaveat: false,
       });
-    } catch (e) {
+    } catch {
       setInitError("WebGL is not available in this environment. Try opening the app in a full browser tab.");
       return;
     }
 
-    instance.on("error", (e) => {
-      console.error("[Map error]", e.error?.message ?? e);
-    });
+    instance.on("error", (e) => console.error("[Map error]", e.error?.message ?? e));
 
     instance.on("load", () => {
-      console.log("[Map] loaded");
       instance.resize();
       setMapReady(true);
       setStyleReady(true);
@@ -65,7 +72,6 @@ export default function MapExplorer() {
 
     instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
-    // Resize after a small delay in case the container wasn't fully laid out
     const t = setTimeout(() => instance.resize(), 500);
     map.current = instance;
 
@@ -78,7 +84,7 @@ export default function MapExplorer() {
     };
   }, []);
 
-  // Step 2: data
+  // Step 2: fetch boundary data
   const { data: locationsData, isFetching } = useGetLocations(
     { lat: center.lat, long: center.lng, type: activeLayer as GetLocationsType },
     {
@@ -93,24 +99,19 @@ export default function MapExplorer() {
     }
   );
 
-  // Step 3: draw layers
+  // Step 3: draw boundary layers
   useEffect(() => {
     const m = map.current;
     if (!m || !mapReady || !styleReady) return;
 
-    const SRC = "bounds-src";
-    const FILL = "bounds-fill";
-    const LINE = "bounds-line";
-
     const removeLayers = () => {
-      // Guard: map may have been removed (e.g. during HMR)
       try {
         if (!m.isStyleLoaded()) return;
         if (m.getLayer(FILL)) m.removeLayer(FILL);
         if (m.getLayer(LINE)) m.removeLayer(LINE);
         if (m.getSource(SRC)) m.removeSource(SRC);
       } catch {
-        // Map was already destroyed — nothing to clean up
+        // map already destroyed
       }
     };
 
@@ -118,33 +119,32 @@ export default function MapExplorer() {
 
     if (!activeLayer || !locationsData?.locations?.length) return;
 
-    const { color, label } = LAYER_CONFIG[activeLayer];
+    const { color } = LAYER_CONFIG[activeLayer];
 
-    type LocMap = {
-      boundary?: number[][][] | number[][][][];
-      geometryType?: string;
-    };
+    type LocMap = { boundary?: number[][][] | number[][][][]; geometryType?: string };
+
     const features: GeoJSON.Feature[] = locationsData.locations
       .filter((loc) => {
-        const m = loc.map as LocMap | undefined;
-        return Array.isArray(m?.boundary) && m!.boundary!.length > 0;
+        const lm = loc.map as LocMap | undefined;
+        return Array.isArray(lm?.boundary) && lm!.boundary!.length > 0;
       })
       .map((loc) => {
-        const m = loc.map as LocMap;
-        const geomType = m.geometryType ?? "Polygon";
+        const lm = loc.map as LocMap;
         return {
           type: "Feature" as const,
           geometry: {
-            type: geomType,
-            // boundary already matches GeoJSON coordinate nesting for both
-            // Polygon (number[][][]) and MultiPolygon (number[][][][])
-            coordinates: m.boundary!,
+            type: lm.geometryType ?? "Polygon",
+            coordinates: lm.boundary!,
           } as GeoJSON.Geometry,
-          properties: { name: loc.name, locationId: loc.locationId },
+          properties: {
+            name: loc.name,
+            locationId: loc.locationId,
+            // Embed demographics so onClick can read them without stale closure issues
+            demographics: JSON.stringify((loc as any).demographics ?? {}),
+          },
         };
       });
 
-    console.log(`[Map] ${activeLayer}: ${features.length} features loaded`);
     if (!features.length) return;
 
     try {
@@ -158,10 +158,7 @@ export default function MapExplorer() {
         id: FILL,
         type: "fill",
         source: SRC,
-        paint: {
-          "fill-color": color,
-          "fill-opacity": 0,
-        },
+        paint: { "fill-color": color, "fill-opacity": 0 },
       });
 
       m.addLayer({
@@ -175,43 +172,37 @@ export default function MapExplorer() {
         },
       });
     } catch (e) {
-      console.warn("[Map] Failed to add layers (style not ready):", e);
+      console.warn("[Map] Failed to add layers:", e);
       return;
     }
-
-    const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false });
 
     const onEnter = (e: maplibregl.MapLayerMouseEvent) => {
       if (!e.features?.length) return;
       m.getCanvas().style.cursor = "pointer";
       const id = e.features[0].id;
-      setHoveredId((prev) => {
-        if (prev !== null) m.setFeatureState({ source: SRC, id: prev }, { hover: false });
-        if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: true });
-        return id !== undefined ? String(id) : null;
-      });
+      if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: true });
     };
 
-    const onLeave = () => {
+    const onLeave = (e: maplibregl.MapLayerMouseEvent) => {
       m.getCanvas().style.cursor = "";
-      setHoveredId((prev) => {
-        if (prev !== null) m.setFeatureState({ source: SRC, id: prev }, { hover: false });
-        return null;
-      });
+      if (e.features?.length) {
+        const id = e.features[0].id;
+        if (id !== undefined) m.setFeatureState({ source: SRC, id }, { hover: false });
+      }
     };
 
     const onClick = (e: maplibregl.MapLayerMouseEvent) => {
       if (!e.features?.length) return;
-      const name = e.features[0].properties?.name ?? "";
-      popup
-        .setLngLat(e.lngLat)
-        .setHTML(
-          `<div style="padding:10px;min-width:150px;color:#f4f4f5;background:#09090b;border-radius:6px;">` +
-            `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#71717a;margin-bottom:4px;">${label}</div>` +
-            `<div style="font-size:14px;font-weight:700;">${name}</div>` +
-          `</div>`
-        )
-        .addTo(m);
+      const props = e.features[0].properties as {
+        name: string;
+        locationId: string;
+        demographics: string;
+      };
+      setSelectedLocation({
+        name: props.name,
+        locationId: props.locationId,
+        demographics: JSON.parse(props.demographics || "{}") as Demographics,
+      });
     };
 
     m.on("mouseenter", FILL, onEnter);
@@ -219,7 +210,6 @@ export default function MapExplorer() {
     m.on("click", FILL, onClick);
 
     return () => {
-      popup.remove();
       m.off("mouseenter", FILL, onEnter);
       m.off("mouseleave", FILL, onLeave);
       m.off("click", FILL, onClick);
@@ -227,14 +217,36 @@ export default function MapExplorer() {
     };
   }, [locationsData, activeLayer, mapReady, styleReady]);
 
-  // Popup styles
+  // Step 4: isolate selected boundary — filter map to show only clicked feature
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !styleReady) return;
+    try {
+      if (!m.getLayer(FILL)) return;
+      if (selectedLocation) {
+        const f = ["==", ["get", "locationId"], selectedLocation.locationId] as maplibregl.FilterSpecification;
+        m.setFilter(FILL, f);
+        m.setFilter(LINE, f);
+      } else {
+        m.setFilter(FILL, null);
+        m.setFilter(LINE, null);
+      }
+    } catch {
+      // layers not ready
+    }
+  }, [selectedLocation, styleReady, mapReady]);
+
+  // Deselect when layer changes
+  useEffect(() => {
+    setSelectedLocation(null);
+  }, [activeLayer]);
+
+  // Popup CSS (just for popups we may add later — kept as baseline)
   useEffect(() => {
     const style = document.createElement("style");
     style.textContent = `
       .maplibregl-popup-content { background:#09090b !important; border:1px solid #27272a; border-radius:6px; padding:0; box-shadow:0 8px 24px rgb(0 0 0/.7); }
       .maplibregl-popup-tip { display:none; }
-      .maplibregl-popup-close-button { color:#71717a; font-size:18px; padding:2px 8px; line-height:1; }
-      .maplibregl-popup-close-button:hover { color:#fff; background:transparent; }
     `;
     document.head.appendChild(style);
     return () => document.head.removeChild(style);
@@ -252,23 +264,26 @@ export default function MapExplorer() {
     );
   }
 
+  const layerCfg = activeLayer ? LAYER_CONFIG[activeLayer] : null;
+
   return (
     <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden", background: "#09090b" }}>
       <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
 
+      {/* Controls */}
       <div style={{ position: "absolute", top: 16, left: 16, zIndex: 10, display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Header */}
         <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-4 py-3 rounded-lg shadow-xl flex items-center gap-3">
           <div className="bg-zinc-800 p-1.5 rounded-md">
             <Layers className="w-4 h-4 text-zinc-300" />
           </div>
           <div>
             <h1 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">Boundary Explorer</h1>
-            <p className="text-xs text-zinc-500">Select a layer below</p>
+            <p className="text-xs text-zinc-500">
+              {selectedLocation ? `Viewing: ${selectedLocation.name}` : "Select a layer below"}
+            </p>
           </div>
         </div>
 
-        {/* Layer buttons */}
         <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-2 rounded-lg shadow-xl w-52">
           <div className="px-2 py-1 flex items-center justify-between mb-1">
             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Layer</span>
@@ -302,7 +317,28 @@ export default function MapExplorer() {
             <span className="text-xs text-zinc-500">Loading map…</span>
           </div>
         )}
+
+        {selectedLocation && (
+          <button
+            onClick={() => setSelectedLocation(null)}
+            className="bg-zinc-950/90 backdrop-blur-md border border-zinc-700 px-3 py-2 rounded-lg text-xs text-zinc-300 hover:text-zinc-100 hover:border-zinc-500 transition-colors text-left"
+          >
+            ← Show all boundaries
+          </button>
+        )}
       </div>
+
+      {/* Demographics drawer */}
+      {layerCfg && (
+        <DemographicsDrawer
+          open={!!selectedLocation}
+          name={selectedLocation?.name ?? ""}
+          layerLabel={layerCfg.label}
+          layerColor={layerCfg.color}
+          demographics={selectedLocation?.demographics ?? {}}
+          onClose={() => setSelectedLocation(null)}
+        />
+      )}
     </div>
   );
 }
