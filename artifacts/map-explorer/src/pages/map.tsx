@@ -455,11 +455,17 @@ export default function MapExplorer() {
       return;
     }
 
+    // Determine whether this trigger is purely a viewport change (pan/zoom) or something more
+    const fullKey = [selectedLocation.locationId, activeLayer, JSON.stringify(listingFilters), listingStyleRetry].join("|");
+    const prevFullKey = listingsResetKeyRef.current;
+    const isBoundsOnly = prevFullKey === fullKey;
+    listingsResetKeyRef.current = fullKey;
+
     // Location or layer change: clear existing dots immediately so stale data
     // from a previous boundary never mixes with the incoming one.
-    const locationLayerKey = `${selectedLocation.locationId}|${activeLayer}`;
-    if (listingsResetKeyRef.current !== locationLayerKey) {
-      listingsResetKeyRef.current = locationLayerKey;
+    const prevLocLayer = prevFullKey.split("|").slice(0, 2).join("|");
+    const curLocLayer = `${selectedLocation.locationId}|${activeLayer}`;
+    if (prevLocLayer !== curLocLayer) {
       listingFeaturesRef.current.clear();
       setListingCount(null);
       // Wipe source without removing layers so there's no teardown flash
@@ -468,7 +474,8 @@ export default function MapExplorer() {
     }
 
     const session = ++listingsSessionRef.current;
-    listingsBatchRef.current = 0;
+    // Do NOT reset listingsBatchRef here — batchIds must be globally unique so that
+    // the bloom filter never accidentally matches features added by a previous session.
     setListingsLoading(true);
 
     const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
@@ -603,13 +610,16 @@ export default function MapExplorer() {
       const priceRange = listingFilters.priceKey ? PRICE_RANGES.find((r) => r.key === listingFilters.priceKey) : null;
       if (priceRange?.min !== null && priceRange?.min !== undefined) params.set("minPrice", String(priceRange.min));
       if (priceRange?.max !== null && priceRange?.max !== undefined) params.set("maxPrice", String(priceRange.max));
-      // Always send current viewport bounds — Repliers clips to visible area for every interaction
-      const b = m.getBounds();
-      const ne = b.getNorthEast();
-      const nw = b.getNorthWest();
-      const sw = b.getSouthWest();
-      const se = b.getSouthEast();
-      params.set("mapBounds", JSON.stringify([[[ne.lng, ne.lat], [nw.lng, nw.lat], [sw.lng, sw.lat], [se.lng, se.lat]]]));
+      // Viewport bounds only for pan/zoom — filter/location/layer changes load the full boundary
+      // so that a more-restrictive filter never surfaces fewer total dots than expected.
+      if (isBoundsOnly) {
+        const b = m.getBounds();
+        const ne = b.getNorthEast();
+        const nw = b.getNorthWest();
+        const sw = b.getSouthWest();
+        const se = b.getSouthEast();
+        params.set("mapBounds", JSON.stringify([[[ne.lng, ne.lat], [nw.lng, nw.lat], [sw.lng, sw.lat], [se.lng, se.lat]]]));
+      }
       const res = await fetch(`/api/listings?${params}`);
       if (!res.ok) throw new Error(`listings fetch failed: ${res.status}`);
       return res.json();
