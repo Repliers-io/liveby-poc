@@ -8,3 +8,85 @@
 export interface HealthStatus {
   status: string;
 }
+
+export interface LocationAddress {
+  city?: string;
+  state?: string;
+  county?: string;
+  zip?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * GeoJSON polygon or multipolygon geometry
+ */
+export type LocationMapPolygon = { [key: string]: unknown };
+
+export type LocationMapCenter = {
+  lat?: number;
+  long?: number;
+  [key: string]: unknown;
+};
+
+export interface LocationMap {
+  /** GeoJSON polygon or multipolygon geometry */
+  polygon?: LocationMapPolygon;
+  center?: LocationMapCenter;
+  [key: string]: unknown;
+}
+
+export interface LocationDemographics {
+  [key: string]: unknown;
+}
+
+export type LocationSize = { [key: string]: unknown };
+
+export type LocationSchool = { [key: string]: unknown };
+
+export interface Location {
+  locationId: string;
+  name: string;
+  type: string;
+  subType?: string;
+  classification?: string;
+  address?: LocationAddress;
+  map?: LocationMap;
+  size?: LocationSize;
+  demographics?: LocationDemographics;
+  school?: LocationSchool;
+  [key: string]: unknown;
+}
+
+export interface LocationsResponse {
+  locations: Location[];
+  count?: number;
+}
+
+export interface ErrorResponse {
+  error: string;
+}
+
+export type GetLocationsParams = {
+  /**
+   * Latitude of the center point
+   */
+  lat: number;
+  /**
+   * Longitude of the center point
+   */
+  long: number;
+  /**
+   * Boundary type to fetch
+   */
+  type: GetLocationsType;
+};
+
+export type GetLocationsType =
+  (typeof GetLocationsType)[keyof typeof GetLocationsType];
+
+export const GetLocationsType = {
+  area: "area",
+  city: "city",
+  neighborhood: "neighborhood",
+  school: "school",
+} as const;

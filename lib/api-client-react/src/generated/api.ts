@@ -13,7 +13,12 @@ import type {
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HealthStatus } from "./api.schemas";
+import type {
+  ErrorResponse,
+  GetLocationsParams,
+  HealthStatus,
+  LocationsResponse,
+} from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
 import type { ErrorType } from "../custom-fetch";
@@ -92,6 +97,101 @@ export function useHealthCheck<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getHealthCheckQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Fetches boundary data from the Repliers API for a given lat/long and boundary type
+ * @summary Get location boundaries
+ */
+export const getGetLocationsUrl = (params: GetLocationsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/locations?${stringifiedParams}`
+    : `/api/locations`;
+};
+
+export const getLocations = async (
+  params: GetLocationsParams,
+  options?: RequestInit,
+): Promise<LocationsResponse> => {
+  return customFetch<LocationsResponse>(getGetLocationsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetLocationsQueryKey = (params?: GetLocationsParams) => {
+  return [`/api/locations`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetLocationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLocations>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetLocationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLocations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetLocationsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getLocations>>> = ({
+    signal,
+  }) => getLocations(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLocations>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLocationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLocations>>
+>;
+export type GetLocationsQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get location boundaries
+ */
+
+export function useGetLocations<
+  TData = Awaited<ReturnType<typeof getLocations>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetLocationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getLocations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLocationsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

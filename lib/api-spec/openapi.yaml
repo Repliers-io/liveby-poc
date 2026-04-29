@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: locations
+    description: Location boundary operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /locations:
+    get:
+      operationId: getLocations
+      tags: [locations]
+      summary: Get location boundaries
+      description: Fetches boundary data from the Repliers API for a given lat/long and boundary type
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+          description: Latitude of the center point
+        - name: long
+          in: query
+          required: true
+          schema:
+            type: number
+          description: Longitude of the center point
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [area, city, neighborhood, school]
+          description: Boundary type to fetch
+      responses:
+        "200":
+          description: Location boundaries returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationsResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +80,82 @@ components:
           type: string
       required:
         - status
-
+    LocationAddress:
+      type: object
+      properties:
+        city:
+          type: string
+        state:
+          type: string
+        county:
+          type: string
+        zip:
+          type: string
+      additionalProperties: true
+    LocationMap:
+      type: object
+      properties:
+        polygon:
+          type: object
+          description: GeoJSON polygon or multipolygon geometry
+          additionalProperties: true
+        center:
+          type: object
+          properties:
+            lat:
+              type: number
+            long:
+              type: number
+          additionalProperties: true
+      additionalProperties: true
+    LocationDemographics:
+      type: object
+      additionalProperties: true
+    Location:
+      type: object
+      properties:
+        locationId:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        subType:
+          type: string
+        classification:
+          type: string
+        address:
+          $ref: "#/components/schemas/LocationAddress"
+        map:
+          $ref: "#/components/schemas/LocationMap"
+        size:
+          type: object
+          additionalProperties: true
+        demographics:
+          $ref: "#/components/schemas/LocationDemographics"
+        school:
+          type: object
+          additionalProperties: true
+      required:
+        - locationId
+        - name
+        - type
+      additionalProperties: true
+    LocationsResponse:
+      type: object
+      properties:
+        locations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+        count:
+          type: number
+      required:
+        - locations
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

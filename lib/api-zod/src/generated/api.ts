@@ -14,3 +14,53 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * Fetches boundary data from the Repliers API for a given lat/long and boundary type
+ * @summary Get location boundaries
+ */
+export const GetLocationsQueryParams = zod.object({
+  lat: zod.coerce.number().describe("Latitude of the center point"),
+  long: zod.coerce.number().describe("Longitude of the center point"),
+  type: zod
+    .enum(["area", "city", "neighborhood", "school"])
+    .describe("Boundary type to fetch"),
+});
+
+export const GetLocationsResponse = zod.object({
+  locations: zod.array(
+    zod.object({
+      locationId: zod.string(),
+      name: zod.string(),
+      type: zod.string(),
+      subType: zod.string().optional(),
+      classification: zod.string().optional(),
+      address: zod
+        .object({
+          city: zod.string().optional(),
+          state: zod.string().optional(),
+          county: zod.string().optional(),
+          zip: zod.string().optional(),
+        })
+        .optional(),
+      map: zod
+        .object({
+          polygon: zod
+            .record(zod.string(), zod.unknown())
+            .optional()
+            .describe("GeoJSON polygon or multipolygon geometry"),
+          center: zod
+            .object({
+              lat: zod.number().optional(),
+              long: zod.number().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+      size: zod.record(zod.string(), zod.unknown()).optional(),
+      demographics: zod.record(zod.string(), zod.unknown()).optional(),
+      school: zod.record(zod.string(), zod.unknown()).optional(),
+    }),
+  ),
+  count: zod.number().optional(),
+});

@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Map Boundary Explorer"
+version = "1.0.0"
+id = "artifacts/map-explorer"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18741
+
+[services.development]
+run = "pnpm --filter @workspace/map-explorer run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/map-explorer", "run", "build" ]
+publicDir = "artifacts/map-explorer/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18741"
+BASE_PATH = "/"

@@ -6,4 +6,16 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./errorResponse";
+export * from "./getLocationsParams";
+export * from "./getLocationsType";
 export * from "./healthStatus";
+export * from "./location";
+export * from "./locationAddress";
+export * from "./locationDemographics";
+export * from "./locationMap";
+export * from "./locationMapCenter";
+export * from "./locationMapPolygon";
+export * from "./locationSchool";
+export * from "./locationSize";
+export * from "./locationsResponse";
