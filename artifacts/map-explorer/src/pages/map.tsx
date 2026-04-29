@@ -455,16 +455,17 @@ export default function MapExplorer() {
       return;
     }
 
-    // Anything that should wipe existing dots and start fresh (not viewport-pan/zoom)
-    const resetKey = [
-      selectedLocation.locationId,
-      activeLayer,
-      JSON.stringify(listingFilters),
-      listingStyleRetry,
-    ].join("|");
-
-    const isBoundsOnly = listingsResetKeyRef.current === resetKey && listingFeaturesRef.current.size > 0;
-    listingsResetKeyRef.current = resetKey;
+    // Location or layer change: clear existing dots immediately so stale data
+    // from a previous boundary never mixes with the incoming one.
+    const locationLayerKey = `${selectedLocation.locationId}|${activeLayer}`;
+    if (listingsResetKeyRef.current !== locationLayerKey) {
+      listingsResetKeyRef.current = locationLayerKey;
+      listingFeaturesRef.current.clear();
+      setListingCount(null);
+      // Wipe source without removing layers so there's no teardown flash
+      const existingSrc = m.getSource(LISTINGS_SRC) as maplibregl.GeoJSONSource | undefined;
+      if (existingSrc) existingSrc.setData({ type: "FeatureCollection", features: [] });
+    }
 
     const session = ++listingsSessionRef.current;
     listingsBatchRef.current = 0;
@@ -472,12 +473,8 @@ export default function MapExplorer() {
 
     const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
 
-    if (!isBoundsOnly) {
-      // Full reset: clear existing dots and rebuild layers
-      listingFeaturesRef.current.clear();
-      setListingCount(null);
-      clearListingLayers();
-
+    // Set up layers the first time (or after they were torn down)
+    if (!m.getSource(LISTINGS_SRC)) {
       try {
         m.addSource(LISTINGS_SRC, {
           type: "geojson",
@@ -517,6 +514,9 @@ export default function MapExplorer() {
 
     let animFrame: number | null = null;
 
+    // Tracks every coord key returned by THIS fetch — used for reconciliation at the end
+    const newKeySet = new Set<string>();
+
     const animateBloom = (batchNum: number) => {
       if (animFrame !== null) cancelAnimationFrame(animFrame);
       m.setFilter(LISTINGS_BLOOM, ["==", ["get", "batchId"], batchNum]);
@@ -543,20 +543,21 @@ export default function MapExplorer() {
       animFrame = requestAnimationFrame(frame);
     };
 
-    // Delta-aware addBatch: only adds features not already keyed by coordinate
+    // For each page: register all keys in newKeySet, only ADD points not already on map
     const addBatch = (listings: RawListing[]) => {
       if (listingsSessionRef.current !== session) return;
       const featureMap = listingFeaturesRef.current;
-      if (featureMap.size >= MAX_MAP_POINTS) return;
 
       const batchNum = ++listingsBatchRef.current;
       let addedAny = false;
 
       for (const l of listings) {
-        if (featureMap.size >= MAX_MAP_POINTS) break;
+        if (newKeySet.size >= MAX_MAP_POINTS) break;
         if (!l.map?.latitude || !l.map?.longitude) continue;
         const key = `${l.map.longitude.toFixed(5)},${l.map.latitude.toFixed(5)}`;
-        if (featureMap.has(key)) continue; // already on map — skip, no flicker
+        newKeySet.add(key); // always register, even if already on map
+
+        if (featureMap.has(key)) continue; // already on map — keep it, no flicker
 
         featureMap.set(key, {
           type: "Feature",
@@ -566,12 +567,28 @@ export default function MapExplorer() {
         addedAny = true;
       }
 
-      if (!addedAny) return; // nothing new to paint
+      if (!addedAny) return;
 
       const src = m.getSource(LISTINGS_SRC) as maplibregl.GeoJSONSource | undefined;
       if (src) src.setData({ type: "FeatureCollection", features: Array.from(featureMap.values()) });
-
       animateBloom(batchNum);
+    };
+
+    // After all pages: quietly remove any dot no longer in this fetch's result
+    const reconcile = () => {
+      if (listingsSessionRef.current !== session) return;
+      const featureMap = listingFeaturesRef.current;
+      let changed = false;
+      for (const key of Array.from(featureMap.keys())) {
+        if (!newKeySet.has(key)) {
+          featureMap.delete(key);
+          changed = true;
+        }
+      }
+      if (changed) {
+        const src = m.getSource(LISTINGS_SRC) as maplibregl.GeoJSONSource | undefined;
+        if (src) src.setData({ type: "FeatureCollection", features: Array.from(featureMap.values()) });
+      }
     };
 
     const fetchPage = async (pageNum: number): Promise<{ listings: RawListing[]; numPages: number; count: number }> => {
@@ -586,17 +603,13 @@ export default function MapExplorer() {
       const priceRange = listingFilters.priceKey ? PRICE_RANGES.find((r) => r.key === listingFilters.priceKey) : null;
       if (priceRange?.min !== null && priceRange?.min !== undefined) params.set("minPrice", String(priceRange.min));
       if (priceRange?.max !== null && priceRange?.max !== undefined) params.set("maxPrice", String(priceRange.max));
-      // Only clip to viewport bounds for incremental (pan/zoom) updates.
-      // Full resets (filter/location/layer change) load from the whole boundary so that
-      // applying a more-restrictive filter never surfaces listings that weren't there before.
-      if (isBoundsOnly) {
-        const b = m.getBounds();
-        const ne = b.getNorthEast();
-        const nw = b.getNorthWest();
-        const sw = b.getSouthWest();
-        const se = b.getSouthEast();
-        params.set("mapBounds", JSON.stringify([[[ne.lng, ne.lat], [nw.lng, nw.lat], [sw.lng, sw.lat], [se.lng, se.lat]]]));
-      }
+      // Always send current viewport bounds — Repliers clips to visible area for every interaction
+      const b = m.getBounds();
+      const ne = b.getNorthEast();
+      const nw = b.getNorthWest();
+      const sw = b.getSouthWest();
+      const se = b.getSouthEast();
+      params.set("mapBounds", JSON.stringify([[[ne.lng, ne.lat], [nw.lng, nw.lat], [sw.lng, sw.lat], [se.lng, se.lat]]]));
       const res = await fetch(`/api/listings?${params}`);
       if (!res.ok) throw new Error(`listings fetch failed: ${res.status}`);
       return res.json();
@@ -606,7 +619,7 @@ export default function MapExplorer() {
       const first = await fetchPage(1);
       if (listingsSessionRef.current !== session) return;
 
-      const totalCount = first.count; // real Repliers total — never changes
+      const totalCount = first.count;
       addBatch(first.listings);
       setListingCount({ loaded: listingFeaturesRef.current.size, total: totalCount });
 
@@ -614,12 +627,12 @@ export default function MapExplorer() {
 
       for (
         let page = 2;
-        page <= totalPages && listingFeaturesRef.current.size < MAX_MAP_POINTS;
+        page <= totalPages && newKeySet.size < MAX_MAP_POINTS;
         page += LISTINGS_CONCURRENCY
       ) {
         if (listingsSessionRef.current !== session) return;
 
-        const pagesStillNeeded = Math.ceil((MAX_MAP_POINTS - listingFeaturesRef.current.size) / RESULTS_PER_PAGE);
+        const pagesStillNeeded = Math.ceil((MAX_MAP_POINTS - newKeySet.size) / RESULTS_PER_PAGE);
         const batchSize = Math.min(LISTINGS_CONCURRENCY, pagesStillNeeded, totalPages - page + 1);
         const batch = Array.from({ length: batchSize }, (_, i) => page + i);
 
@@ -633,9 +646,12 @@ export default function MapExplorer() {
           }
         }
 
-        // small stagger so animations don't all pile up
         await new Promise((res) => setTimeout(res, 180));
       }
+
+      // Remove any dot not returned by this fetch (filter/zoom changed what's relevant)
+      reconcile();
+      setListingCount({ loaded: listingFeaturesRef.current.size, total: totalCount });
 
       if (listingsSessionRef.current === session) setListingsLoading(false);
     };
@@ -649,9 +665,6 @@ export default function MapExplorer() {
       listingsSessionRef.current++;
       if (animFrame !== null) cancelAnimationFrame(animFrame);
       setListingsLoading(false);
-      // Listing layers stay alive across bounds-only reloads.
-      // On full unmount, Step 1 cleanup destroys the map; guard against that.
-      // On selectedLocation → null, the early return above handles clearListingLayers.
     };
   }, [selectedLocation, styleReady, mapReady, activeLayer, listingFilters, listingStyleRetry, listingBoundsKey]);
 
