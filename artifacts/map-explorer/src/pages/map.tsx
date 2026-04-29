@@ -586,13 +586,17 @@ export default function MapExplorer() {
       const priceRange = listingFilters.priceKey ? PRICE_RANGES.find((r) => r.key === listingFilters.priceKey) : null;
       if (priceRange?.min !== null && priceRange?.min !== undefined) params.set("minPrice", String(priceRange.min));
       if (priceRange?.max !== null && priceRange?.max !== undefined) params.set("maxPrice", String(priceRange.max));
-      // Include current viewport bounds so Repliers clips listings to the visible area
-      const b = m.getBounds();
-      const ne = b.getNorthEast();
-      const nw = b.getNorthWest();
-      const sw = b.getSouthWest();
-      const se = b.getSouthEast();
-      params.set("mapBounds", JSON.stringify([[[ne.lng, ne.lat], [nw.lng, nw.lat], [sw.lng, sw.lat], [se.lng, se.lat]]]));
+      // Only clip to viewport bounds for incremental (pan/zoom) updates.
+      // Full resets (filter/location/layer change) load from the whole boundary so that
+      // applying a more-restrictive filter never surfaces listings that weren't there before.
+      if (isBoundsOnly) {
+        const b = m.getBounds();
+        const ne = b.getNorthEast();
+        const nw = b.getNorthWest();
+        const sw = b.getSouthWest();
+        const se = b.getSouthEast();
+        params.set("mapBounds", JSON.stringify([[[ne.lng, ne.lat], [nw.lng, nw.lat], [sw.lng, sw.lat], [se.lng, se.lat]]]));
+      }
       const res = await fetch(`/api/listings?${params}`);
       if (!res.ok) throw new Error(`listings fetch failed: ${res.status}`);
       return res.json();
