@@ -15,6 +15,7 @@ router.get("/listings", async (req, res) => {
     minBaths,
     minPrice,
     maxPrice,
+    mapBounds,
   } = req.query as Record<string, string>;
 
   if (!locationId) {
@@ -39,6 +40,7 @@ router.get("/listings", async (req, res) => {
   if (minBaths) url.searchParams.set("minBaths", minBaths);
   if (minPrice) url.searchParams.set("minPrice", minPrice);
   if (maxPrice) url.searchParams.set("maxPrice", maxPrice);
+  if (mapBounds) url.searchParams.set("map", mapBounds);
 
   try {
     const response = await fetch(url.toString(), {

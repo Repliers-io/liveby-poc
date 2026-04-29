@@ -89,6 +89,7 @@ export default function MapExplorer() {
   const [listingsLoading, setListingsLoading] = useState(false);
   const [listingFilters, setListingFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
   const [listingStyleRetry, setListingStyleRetry] = useState(0);
+  const [listingBoundsKey, setListingBoundsKey] = useState(0);
   // Refs used inside stable event-handler closures
   const selectedRef = useRef<SelectedLocation | null>(null);
   const locationsRef = useRef<any[]>([]);
@@ -127,8 +128,11 @@ export default function MapExplorer() {
     });
 
     instance.on("moveend", () => {
-      // Don't re-fetch while a boundary is selected — user may be panning/zooming
-      if (selectedRef.current) return;
+      if (selectedRef.current) {
+        // Re-fetch listings with new viewport bounds
+        setListingBoundsKey((n) => n + 1);
+        return;
+      }
       const c = instance.getCenter();
       setCenter({ lat: c.lat, lng: c.lng });
     });
@@ -518,6 +522,13 @@ export default function MapExplorer() {
       const priceRange = listingFilters.priceKey ? PRICE_RANGES.find((r) => r.key === listingFilters.priceKey) : null;
       if (priceRange?.min !== null && priceRange?.min !== undefined) params.set("minPrice", String(priceRange.min));
       if (priceRange?.max !== null && priceRange?.max !== undefined) params.set("maxPrice", String(priceRange.max));
+      // Include current viewport bounds so Repliers clips listings to the visible area
+      const b = m.getBounds();
+      const ne = b.getNorthEast();
+      const nw = b.getNorthWest();
+      const sw = b.getSouthWest();
+      const se = b.getSouthEast();
+      params.set("mapBounds", JSON.stringify([[[ne.lng, ne.lat], [nw.lng, nw.lat], [sw.lng, sw.lat], [se.lng, se.lat]]]));
       const res = await fetch(`/api/listings?${params}`);
       if (!res.ok) throw new Error(`listings fetch failed: ${res.status}`);
       return res.json();
@@ -572,7 +583,7 @@ export default function MapExplorer() {
       setListingCount(null);
       setListingsLoading(false);
     };
-  }, [selectedLocation, styleReady, mapReady, activeLayer, listingFilters, listingStyleRetry]);
+  }, [selectedLocation, styleReady, mapReady, activeLayer, listingFilters, listingStyleRetry, listingBoundsKey]);
 
   // Popup CSS (just for popups we may add later — kept as baseline)
   useEffect(() => {
