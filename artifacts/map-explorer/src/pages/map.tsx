@@ -138,6 +138,8 @@ export default function MapExplorer() {
           long: center.lng,
           type: activeLayer as GetLocationsType,
         }),
+        // Don't treat data as stale for 30s so pan/zoom doesn't re-fetch unnecessarily
+        staleTime: 30_000,
       },
     }
   );
@@ -242,6 +244,10 @@ export default function MapExplorer() {
 
     const src = m.getSource(SRC) as maplibregl.GeoJSONSource | undefined;
     if (!src) return;
+
+    // While a refetch is in flight locationsData is undefined; skipping here keeps the
+    // source showing its last painted features so boundaries never flash-disappear.
+    if (!locationsData) return;
 
     type LocMap = { boundary?: number[][][] | number[][][][]; geometryType?: string };
 
