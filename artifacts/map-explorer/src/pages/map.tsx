@@ -103,9 +103,15 @@ export default function MapExplorer() {
     const LINE = "bounds-line";
 
     const removeLayers = () => {
-      if (m.getLayer(FILL)) m.removeLayer(FILL);
-      if (m.getLayer(LINE)) m.removeLayer(LINE);
-      if (m.getSource(SRC)) m.removeSource(SRC);
+      // Guard: map may have been removed (e.g. during HMR)
+      try {
+        if (!m.isStyleLoaded()) return;
+        if (m.getLayer(FILL)) m.removeLayer(FILL);
+        if (m.getLayer(LINE)) m.removeLayer(LINE);
+        if (m.getSource(SRC)) m.removeSource(SRC);
+      } catch {
+        // Map was already destroyed — nothing to clean up
+      }
     };
 
     removeLayers();
@@ -141,32 +147,37 @@ export default function MapExplorer() {
     console.log(`[Map] ${activeLayer}: ${features.length} features loaded`);
     if (!features.length) return;
 
-    m.addSource(SRC, {
-      type: "geojson",
-      data: { type: "FeatureCollection", features },
-      generateId: true,
-    });
+    try {
+      m.addSource(SRC, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features },
+        generateId: true,
+      });
 
-    m.addLayer({
-      id: FILL,
-      type: "fill",
-      source: SRC,
-      paint: {
-        "fill-color": color,
-        "fill-opacity": 0,
-      },
-    });
+      m.addLayer({
+        id: FILL,
+        type: "fill",
+        source: SRC,
+        paint: {
+          "fill-color": color,
+          "fill-opacity": 0,
+        },
+      });
 
-    m.addLayer({
-      id: LINE,
-      type: "line",
-      source: SRC,
-      paint: {
-        "line-color": color,
-        "line-width": ["case", ["boolean", ["feature-state", "hover"], false], 2.5, 1.5],
-        "line-opacity": 0.9,
-      },
-    });
+      m.addLayer({
+        id: LINE,
+        type: "line",
+        source: SRC,
+        paint: {
+          "line-color": color,
+          "line-width": ["case", ["boolean", ["feature-state", "hover"], false], 2.5, 1.5],
+          "line-opacity": 0.9,
+        },
+      });
+    } catch (e) {
+      console.warn("[Map] Failed to add layers (style not ready):", e);
+      return;
+    }
 
     const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false });
 
