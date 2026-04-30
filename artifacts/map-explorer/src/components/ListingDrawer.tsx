@@ -26,6 +26,8 @@ type LocationEntry = {
     boundary?: number[][][][];
   };
   size?: number;
+  demographics?: Record<string, unknown> | null;
+  school?: Record<string, unknown> | null;
 };
 
 type ListingDetail = {
@@ -219,11 +221,15 @@ function LocationsSection({
   locations,
   propLat,
   propLng,
+  onLocationSelect,
 }: {
   locations: LocationEntry[];
   propLat?: number;
   propLng?: number;
+  onLocationSelect?: (loc: LocationEntry) => void;
 }) {
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
   // Group by type in display order
   const grouped = useMemo(() => {
     const map = new Map<string, LocationEntry[]>();
@@ -261,13 +267,23 @@ function LocationsSection({
                 const boundary = loc.map?.boundary;
                 const clat = parseFloat(String(loc.map?.latitude));
                 const clng = parseFloat(String(loc.map?.longitude));
+                const isHovered = hoveredId === loc.locationId;
+                const isClickable = !!onLocationSelect;
                 return (
-                  <div key={loc.locationId} style={{
-                    background: "#27272a",
-                    borderRadius: 10,
-                    overflow: "hidden",
-                    border: `1px solid ${typeColor(loc.type)}33`,
-                  }}>
+                  <div
+                    key={loc.locationId}
+                    onClick={() => onLocationSelect?.(loc)}
+                    onMouseEnter={() => isClickable && setHoveredId(loc.locationId)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    style={{
+                      background: isHovered ? "#2d2d31" : "#27272a",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      border: `1px solid ${typeColor(loc.type)}${isHovered ? "88" : "33"}`,
+                      cursor: isClickable ? "pointer" : "default",
+                      transition: "background 0.15s, border-color 0.15s",
+                    }}
+                  >
                     {boundary && boundary.length > 0 && (
                       <BoundaryMiniMap
                         boundary={boundary}
@@ -276,16 +292,30 @@ function LocationsSection({
                         propLng={propLng ?? clng}
                       />
                     )}
-                    <div style={{ padding: "8px 12px 10px" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#f4f4f5" }}>{loc.name}</div>
-                      {loc.address?.city && (
-                        <div style={{ fontSize: 11, color: "#71717a", marginTop: 2 }}>
-                          {[loc.address.street, loc.address.city, loc.address.state].filter(Boolean).join(", ")}
-                        </div>
-                      )}
-                      {loc.size != null && (
-                        <div style={{ fontSize: 11, color: "#52525b", marginTop: 2 }}>
-                          {loc.size.toFixed(1)} km²
+                    <div style={{ padding: "8px 12px 10px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#f4f4f5" }}>{loc.name}</div>
+                        {loc.address?.city && (
+                          <div style={{ fontSize: 11, color: "#71717a", marginTop: 2 }}>
+                            {[loc.address.street, loc.address.city, loc.address.state].filter(Boolean).join(", ")}
+                          </div>
+                        )}
+                        {loc.size != null && (
+                          <div style={{ fontSize: 11, color: "#52525b", marginTop: 2 }}>
+                            {loc.size.toFixed(1)} km²
+                          </div>
+                        )}
+                      </div>
+                      {isClickable && (
+                        <div style={{
+                          flexShrink: 0,
+                          fontSize: 10,
+                          color: isHovered ? typeColor(loc.type) : "#52525b",
+                          transition: "color 0.15s",
+                          paddingTop: 1,
+                          whiteSpace: "nowrap",
+                        }}>
+                          Explore →
                         </div>
                       )}
                     </div>
@@ -333,9 +363,10 @@ type Props = {
   mlsNumber: string | null;
   boardId: string;
   onClose: () => void;
+  onLocationSelect?: (loc: LocationEntry) => void;
 };
 
-export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
+export default function ListingDrawer({ mlsNumber, boardId, onClose, onLocationSelect }: Props) {
   const [photoIdx, setPhotoIdx] = useState(0);
 
   useEffect(() => { setPhotoIdx(0); }, [mlsNumber]);
@@ -540,6 +571,7 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
                 locations={data.locations}
                 propLat={propLat}
                 propLng={propLng}
+                onLocationSelect={onLocationSelect}
               />
             )}
           </>

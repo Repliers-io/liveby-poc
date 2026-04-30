@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@workspace/api-client-react";
@@ -55,6 +55,17 @@ const LAYER_CONFIG = {
   school:         { label: "Schools",          color: "#8B5CF6" },
 };
 
+// Maps a Repliers location type string → our active layer key (null = no layer)
+const LOCATION_TYPE_TO_LAYER: Record<string, LayerType> = {
+  area:           "area",
+  city:           "city",
+  "city-alternate": "city",
+  neighborhood:   "neighborhood",
+  school:         "school",
+  postalCode:     "postalCode",
+  schoolDistrict: "schoolDistrict",
+};
+
 const SRC = "bounds-src";
 const FILL = "bounds-fill";
 const LINE = "bounds-line";
@@ -100,6 +111,8 @@ export default function MapExplorer() {
   const [listingFilters, setListingFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
   const [listingStyleRetry, setListingStyleRetry] = useState(0);
   const [listingBoundsKey, setListingBoundsKey] = useState(0);
+  // Pending location to select after an activeLayer change (avoids the deselect effect clobbering it)
+  const pendingLocationRef = useRef<SelectedLocation | null>(null);
   // Refs used inside stable event-handler closures
   const selectedRef = useRef<SelectedLocation | null>(null);
   const locationsRef = useRef<any[]>([]);
@@ -462,9 +475,41 @@ export default function MapExplorer() {
     }
   }, [selectedLocation, styleReady, mapReady]);
 
-  // Deselect when layer changes
+  // Deselect when layer changes — unless a navigation from ListingDrawer pre-loaded a location
   useEffect(() => {
-    setSelectedLocation(null);
+    if (pendingLocationRef.current) {
+      setSelectedLocation(pendingLocationRef.current);
+      pendingLocationRef.current = null;
+    } else {
+      setSelectedLocation(null);
+    }
+  }, [activeLayer]);
+
+  // Navigate from ListingDrawer location card → switch layer + select that location
+  const navigateToLocation = useCallback((loc: {
+    locationId: string;
+    name: string;
+    type: string;
+    demographics?: Record<string, unknown> | null;
+    school?: Record<string, unknown> | null;
+  }) => {
+    const sel: SelectedLocation = {
+      name: loc.name,
+      locationId: loc.locationId,
+      demographics: (loc.demographics ?? {}) as Demographics,
+      school: (loc.school ?? null) as SchoolData | null,
+    };
+    const targetLayer: LayerType = LOCATION_TYPE_TO_LAYER[loc.type] ?? null;
+    setSelectedListing(null);
+    if (targetLayer && targetLayer !== activeLayer) {
+      // Store the location in the ref; the [activeLayer] effect will pick it up
+      pendingLocationRef.current = sel;
+      setActiveLayer(targetLayer);
+    } else {
+      // Same layer (or no matching layer) — set directly
+      if (targetLayer && !activeLayer) setActiveLayer(targetLayer);
+      setSelectedLocation(sel);
+    }
   }, [activeLayer]);
 
   // Step 5: load and display listings for the selected boundary
@@ -933,6 +978,7 @@ export default function MapExplorer() {
         mlsNumber={selectedListing?.mlsNumber ?? null}
         boardId={selectedListing?.boardId ?? ""}
         onClose={() => setSelectedListing(null)}
+        onLocationSelect={navigateToLocation}
       />
 
       {/* Unified drawer — Demographics, School Details, and Market Statistics tabs */}
