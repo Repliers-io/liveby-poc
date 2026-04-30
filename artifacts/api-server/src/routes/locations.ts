@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { GetLocationsQueryParams } from "@workspace/api-zod";
+import { getRepliersHeaders } from "../lib/repliers-headers";
 
 const router = Router();
 
@@ -31,14 +32,12 @@ router.get("/locations", async (req, res) => {
   url.searchParams.set("type", type);
   url.searchParams.set("fields", REPLIERS_FIELDS);
 
-  const clientIp = req.ip ?? "";
-
   try {
     const response = await fetch(url.toString(), {
       headers: {
         "repliers-api-key": apiKey,
         "Content-Type": "application/json",
-        "x-repliers-forwarded-for": clientIp,
+        ...getRepliersHeaders(req),
       },
     });
 

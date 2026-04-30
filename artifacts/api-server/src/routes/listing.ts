@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getRepliersHeaders } from "../lib/repliers-headers";
 
 const router = Router();
 
@@ -23,14 +24,12 @@ router.get("/listing/:mlsNumber", async (req, res) => {
     url.searchParams.append("locationsType", type);
   }
 
-  const clientIp = req.ip ?? "";
-
   try {
     const response = await fetch(url.toString(), {
       headers: {
         "repliers-api-key": apiKey,
         "Content-Type": "application/json",
-        "x-repliers-forwarded-for": clientIp,
+        ...getRepliersHeaders(req),
       },
     });
 

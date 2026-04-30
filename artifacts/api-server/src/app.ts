@@ -6,9 +6,9 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
-// Trust exactly one proxy hop (Replit's reverse proxy) so req.ip resolves
-// to the actual client IP rather than the proxy's internal address.
-app.set("trust proxy", 1);
+// Trust the proxy chain so Express populates req.socket correctly.
+// Real client IP extraction is handled in lib/repliers-headers.ts.
+app.set("trust proxy", true);
 
 app.use(
   pinoHttp({
