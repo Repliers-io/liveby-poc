@@ -94,14 +94,14 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  school: "#f59e0b",
-  neighborhood: "#22d3ee",
-  city: "#a78bfa",
-  "city-alternate": "#a78bfa",
-  area: "#34d399",
-  postalCode: "#60a5fa",
-  district: "#fb923c",
-  schoolDistrict: "#fbbf24",
+  area:           "#3B82F6",
+  city:           "#10B981",
+  "city-alternate": "#10B981",
+  neighborhood:   "#F59E0B",
+  postalCode:     "#60A5FA",
+  schoolDistrict: "#FBBF24",
+  school:         "#8B5CF6",
+  district:       "#fb923c",
 };
 
 function typeColor(type: string) {
