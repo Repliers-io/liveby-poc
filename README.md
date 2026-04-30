@@ -65,7 +65,7 @@ Create the following environment secrets before running:
 |---|---|
 | `REPLIERS_API_KEY` | Repliers API key for boundary and listing data |
 | `MAPBOX_TOKEN` | Mapbox public token for map tile rendering |
-| `SESSION_SECRET` | Secret for session signing |
+| `SESSION_SECRET` | A long, random string used to sign session cookies (e.g. generate one with `openssl rand -hex 32`) |
 
 ### Install
 
