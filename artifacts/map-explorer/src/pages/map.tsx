@@ -501,12 +501,13 @@ export default function MapExplorer() {
     school?: Record<string, unknown> | null;
     map?: { boundary?: number[][][][]; latitude?: string | number; longitude?: string | number };
   }) => {
+    const boundary = loc.map?.boundary;
     const sel: SelectedLocation = {
       name: loc.name,
       locationId: loc.locationId,
       demographics: (loc.demographics ?? {}) as Demographics,
       school: (loc.school ?? null) as SchoolData | null,
-      boundary: loc.map?.boundary,
+      boundary,
     };
     const targetLayer: LayerType = LOCATION_TYPE_TO_LAYER[loc.type] ?? null;
     setSelectedListing(null);
@@ -518,6 +519,22 @@ export default function MapExplorer() {
       // Same layer (or no matching layer) — set directly
       if (targetLayer && !activeLayer) setActiveLayer(targetLayer);
       setSelectedLocation(sel);
+    }
+    // Fit bounds directly after renders settle — bypasses effect-ordering ambiguity
+    // when the layer switches at the same time as the location.
+    if (boundary && boundary.length > 0) {
+      requestAnimationFrame(() => {
+        const m = map.current;
+        if (!m) return;
+        try {
+          const bbox = getBbox(boundary as number[][][][]);
+          m.fitBounds(bbox, {
+            padding: { top: 80, bottom: 80, left: 80, right: 420 },
+            maxZoom: 14,
+            duration: 600,
+          });
+        } catch { /* map not ready */ }
+      });
     }
   }, [activeLayer]);
 
@@ -549,6 +566,8 @@ export default function MapExplorer() {
     const isBoundsOnly = prevFullKey === fullKey;
     listingsResetKeyRef.current = fullKey;
 
+    const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
+
     // Location or layer change: clear existing dots immediately so stale data
     // from a previous boundary never mixes with the incoming one.
     const prevLocLayer = prevFullKey.split("|").slice(0, 2).join("|");
@@ -559,14 +578,20 @@ export default function MapExplorer() {
       // Wipe source without removing layers so there's no teardown flash
       const existingSrc = m.getSource(LISTINGS_SRC) as maplibregl.GeoJSONSource | undefined;
       if (existingSrc) existingSrc.setData({ type: "FeatureCollection", features: [] });
+      // Update dot/bloom colors to match the new layer
+      try {
+        if (m.getLayer(LISTINGS_DOT)) m.setPaintProperty(LISTINGS_DOT, "circle-color", color);
+        if (m.getLayer(LISTINGS_BLOOM)) {
+          m.setPaintProperty(LISTINGS_BLOOM, "circle-color", color);
+          m.setPaintProperty(LISTINGS_BLOOM, "circle-stroke-color", color);
+        }
+      } catch { /* layers not ready */ }
     }
 
     const session = ++listingsSessionRef.current;
     // Do NOT reset listingsBatchRef here — batchIds must be globally unique so that
     // the bloom filter never accidentally matches features added by a previous session.
     setListingsLoading(true);
-
-    const color = activeLayer ? LAYER_CONFIG[activeLayer].color : "#10B981";
 
     // Set up layers the first time (or after they were torn down)
     if (!m.getSource(LISTINGS_SRC)) {
