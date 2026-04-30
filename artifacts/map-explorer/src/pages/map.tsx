@@ -3,8 +3,9 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@workspace/api-client-react";
 import { Loader2, Layers, Home } from "lucide-react";
-import DemographicsDrawer, { Demographics } from "../components/DemographicsDrawer";
-import SchoolDrawer, { SchoolData } from "../components/SchoolDrawer";
+import LocationDrawer from "../components/LocationDrawer";
+import { type Demographics } from "../components/DemographicsDrawer";
+import { type SchoolData } from "../components/SchoolDrawer";
 
 type RawListing = {
   map: { latitude: number; longitude: number };
@@ -894,25 +895,17 @@ export default function MapExplorer() {
         })()}
       </div>
 
-      {/* School drawer (shown when school layer is active) */}
-      {activeLayer === "school" && (
-        <SchoolDrawer
+      {/* Unified drawer — Demographics, School Details, and Market Statistics tabs */}
+      {layerCfg && (
+        <LocationDrawer
           open={!!selectedLocation}
           name={selectedLocation?.name ?? ""}
-          layerColor={LAYER_CONFIG.school.color}
-          school={selectedLocation?.school ?? {}}
-          onClose={() => setSelectedLocation(null)}
-        />
-      )}
-
-      {/* Demographics drawer (shown for all non-school layers) */}
-      {layerCfg && activeLayer !== "school" && (
-        <DemographicsDrawer
-          open={!!selectedLocation}
-          name={selectedLocation?.name ?? ""}
+          locationId={selectedLocation?.locationId ?? ""}
           layerLabel={layerCfg.label}
           layerColor={layerCfg.color}
+          activeLayer={activeLayer}
           demographics={selectedLocation?.demographics ?? {}}
+          school={selectedLocation?.school ?? null}
           onClose={() => setSelectedLocation(null)}
         />
       )}
