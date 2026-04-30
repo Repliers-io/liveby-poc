@@ -19,6 +19,9 @@ router.get("/listing/:mlsNumber", async (req, res) => {
   if (boardId) url.searchParams.set("boardId", boardId);
   url.searchParams.set("locations", "true");
   url.searchParams.set("locationsSource", "LiveBy");
+  for (const type of ["area", "city", "neighborhood", "postalCode", "schoolDistrict", "school"]) {
+    url.searchParams.append("locationsType", type);
+  }
 
   try {
     const response = await fetch(url.toString(), {
