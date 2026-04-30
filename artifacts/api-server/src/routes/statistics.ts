@@ -65,12 +65,16 @@ router.get("/statistics", async (req, res) => {
     const domMth: MthMap = stats["daysOnMarket"]?.mth ?? {};
     const closedMth: MthMap = stats["closed"]?.mth ?? {};
 
+    // Exclude the current (incomplete) month
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+
     // Union all month keys across the three metrics
     const allMonths = Array.from(new Set([
       ...Object.keys(priceMth),
       ...Object.keys(domMth),
       ...Object.keys(closedMth),
-    ])).sort();
+    ])).filter((m) => m < currentMonth).sort();
 
     const months: MonthEntry[] = allMonths.map((month) => ({
       month,
