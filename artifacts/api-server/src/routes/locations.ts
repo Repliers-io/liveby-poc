@@ -31,11 +31,15 @@ router.get("/locations", async (req, res) => {
   url.searchParams.set("type", type);
   url.searchParams.set("fields", REPLIERS_FIELDS);
 
+  const clientIp = (req.headers["x-forwarded-for"] as string | undefined)
+    ?.split(",")[0]?.trim() || req.ip || "";
+
   try {
     const response = await fetch(url.toString(), {
       headers: {
         "repliers-api-key": apiKey,
         "Content-Type": "application/json",
+        "x-repliers-forwarded-for": clientIp,
       },
     });
 

@@ -40,9 +40,16 @@ router.get("/statistics", async (req, res) => {
   url.searchParams.set("statistics", "avg-daysOnMarket,cnt-closed,med-soldPrice,grp-mth");
   url.searchParams.set("minSoldDate", minSoldDate);
 
+  const clientIp = (req.headers["x-forwarded-for"] as string | undefined)
+    ?.split(",")[0]?.trim() || req.ip || "";
+
   try {
     const response = await fetch(url.toString(), {
-      headers: { "repliers-api-key": apiKey, "Content-Type": "application/json" },
+      headers: {
+        "repliers-api-key": apiKey,
+        "Content-Type": "application/json",
+        "x-repliers-forwarded-for": clientIp,
+      },
     });
 
     if (!response.ok) {
