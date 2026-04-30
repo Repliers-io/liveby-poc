@@ -403,6 +403,29 @@ export default function MapExplorer() {
         };
       });
 
+    // If a specific location was navigated to (from listing drawer) and its boundary
+    // isn't in the current area's API response yet, keep it in the source so the
+    // active FILL/LINE filter continues to match something.
+    const selForInjection = selectedRef.current;
+    if (
+      selForInjection?.boundary &&
+      !features.some((f) => f.properties?.locationId === selForInjection.locationId)
+    ) {
+      features.push({
+        type: "Feature" as const,
+        geometry: {
+          type: "MultiPolygon",
+          coordinates: selForInjection.boundary,
+        } as GeoJSON.Geometry,
+        properties: {
+          name: selForInjection.name,
+          locationId: selForInjection.locationId,
+          demographics: JSON.stringify(selForInjection.demographics ?? {}),
+          school: JSON.stringify(selForInjection.school ?? null),
+        },
+      });
+    }
+
     src.setData({ type: "FeatureCollection", features });
 
     // Fit to all boundaries on the first data load after a layer change —
@@ -462,6 +485,31 @@ export default function MapExplorer() {
           m.setFilter(FILL, f);
           m.setFilter(LINE, f);
           m.setPaintProperty(FILL, "fill-opacity", 0.1);
+
+          // If this location came from the listing drawer (boundary stored on sel but not yet
+          // in the locations API data for the current viewport), inject it into the source
+          // immediately so the filter has something to render.
+          const inLocations = locationsRef.current.some(
+            (l) => l.locationId === selectedLocation.locationId,
+          );
+          if (!inLocations && selectedLocation.boundary) {
+            const src = m.getSource(SRC) as maplibregl.GeoJSONSource | undefined;
+            if (src) {
+              src.setData({
+                type: "FeatureCollection",
+                features: [{
+                  type: "Feature",
+                  geometry: { type: "MultiPolygon", coordinates: selectedLocation.boundary } as GeoJSON.Geometry,
+                  properties: {
+                    name: selectedLocation.name,
+                    locationId: selectedLocation.locationId,
+                    demographics: JSON.stringify(selectedLocation.demographics ?? {}),
+                    school: JSON.stringify(selectedLocation.school ?? null),
+                  },
+                }],
+              });
+            }
+          }
         }
       } catch { /* style not ready */ }
     } else {
