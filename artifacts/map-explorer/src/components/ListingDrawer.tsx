@@ -113,12 +113,12 @@ function typeLabel(type: string) {
 // ─── SVG boundary mini-map ────────────────────────────────────────────────────
 
 function BoundaryMiniMap({
-  boundary,
+  boundary: rawBoundary,
   color,
   propLat,
   propLng,
 }: {
-  boundary: number[][][][];
+  boundary: number[][][] | number[][][][];
   color: string;
   propLat?: number;
   propLng?: number;
@@ -128,6 +128,14 @@ function BoundaryMiniMap({
   const PAD = 12;
 
   const { paths, dotX, dotY } = useMemo(() => {
+    // Normalise Polygon vs MultiPolygon: detect by checking if boundary[0][0][0] is a number.
+    // Polygon:      [ring][point] = [lng, lat]  → depth-3
+    // MultiPolygon: [polygon][ring][point] = [lng, lat] → depth-4
+    const isPolygon = !Array.isArray((rawBoundary as number[][][][])?.[0]?.[0]?.[0]);
+    const boundary: number[][][][] = isPolygon
+      ? [rawBoundary as number[][][]]
+      : (rawBoundary as number[][][][]);
+
     // Flatten all coordinates to find bounds
     const pts: [number, number][] = [];
     for (const polygon of boundary) {
@@ -175,7 +183,7 @@ function BoundaryMiniMap({
     }
 
     return { paths: builtPaths, dotX, dotY };
-  }, [boundary, propLat, propLng]);
+  }, [rawBoundary, propLat, propLng]);
 
   if (paths.length === 0) return null;
 
