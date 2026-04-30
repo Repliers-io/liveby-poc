@@ -22,8 +22,10 @@ type MonthData = {
 
 type StatisticsResponse = { months: MonthData[] };
 
-async function fetchStatistics(locationId: string): Promise<StatisticsResponse> {
-  const res = await fetch(`/api/statistics?locationId=${encodeURIComponent(locationId)}`);
+async function fetchStatistics(locationId: string, type?: string | null): Promise<StatisticsResponse> {
+  const params = new URLSearchParams({ locationId });
+  if (type) params.set("type", type);
+  const res = await fetch(`/api/statistics?${params.toString()}`);
   if (!res.ok) throw new Error(`Statistics fetch failed: ${res.status}`);
   return res.json();
 }
@@ -32,6 +34,7 @@ type Props = {
   open: boolean;
   name: string;
   locationId: string;
+  listingType?: string | null;
   layerLabel: string;
   layerColor: string;
   activeLayer: LayerType;
@@ -176,10 +179,10 @@ function DeltaBadge({ pct, inverse = false }: { pct: number | null; inverse?: bo
 
 // ─── Market Stats Tab ─────────────────────────────────────────────────────────
 
-function MarketStatsTab({ locationId }: { locationId: string }) {
+function MarketStatsTab({ locationId, listingType }: { locationId: string; listingType?: string | null }) {
   const { data, isLoading, isError } = useQuery<StatisticsResponse>({
-    queryKey: ["statistics", locationId],
-    queryFn: () => fetchStatistics(locationId),
+    queryKey: ["statistics", locationId, listingType ?? "sale"],
+    queryFn: () => fetchStatistics(locationId, listingType),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -686,7 +689,7 @@ function SchoolTab({ school, layerColor }: { school: SchoolData; layerColor: str
 // ─── Main LocationDrawer ───────────────────────────────────────────────────────
 
 export default function LocationDrawer({
-  open, name, locationId, layerLabel, layerColor, activeLayer,
+  open, name, locationId, listingType, layerLabel, layerColor, activeLayer,
   demographics, school, onClose,
 }: Props) {
   const showSchoolTab = activeLayer === "school" && school != null;
@@ -775,7 +778,7 @@ export default function LocationDrawer({
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {activeTab === "demographics" && <DemographicsTab d={demographics} />}
         {activeTab === "school" && showSchoolTab && <SchoolTab school={school!} layerColor={layerColor} />}
-        {activeTab === "stats" && <MarketStatsTab locationId={locationId} />}
+        {activeTab === "stats" && <MarketStatsTab locationId={locationId} listingType={listingType} />}
       </div>
     </div>
   );

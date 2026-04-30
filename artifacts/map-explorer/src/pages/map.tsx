@@ -901,6 +901,7 @@ export default function MapExplorer() {
           open={!!selectedLocation}
           name={selectedLocation?.name ?? ""}
           locationId={selectedLocation?.locationId ?? ""}
+          listingType={listingFilters.listingType}
           layerLabel={layerCfg.label}
           layerColor={layerCfg.color}
           activeLayer={activeLayer}

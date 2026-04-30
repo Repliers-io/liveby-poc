@@ -12,7 +12,7 @@ type MonthEntry = {
 };
 
 router.get("/statistics", async (req, res) => {
-  const { locationId } = req.query as Record<string, string>;
+  const { locationId, type } = req.query as Record<string, string>;
 
   if (!locationId) {
     res.status(400).json({ error: "locationId is required" });
@@ -36,7 +36,7 @@ router.get("/statistics", async (req, res) => {
   url.searchParams.set("status", "U");
   url.searchParams.append("lastStatus", "Sld");
   url.searchParams.append("lastStatus", "Lsd");
-  url.searchParams.set("type", "sale");
+  url.searchParams.set("type", (type ?? "sale").toLowerCase());
   url.searchParams.set("statistics", "avg-daysOnMarket,cnt-closed,med-soldPrice,grp-mth");
   url.searchParams.set("minSoldDate", minSoldDate);
 
