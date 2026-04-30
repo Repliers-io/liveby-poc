@@ -7,30 +7,30 @@ function isValidIp(ip: string): boolean {
   return IPV4.test(ip) || IPV6.test(ip);
 }
 
-export function getRepliersHeaders(req: Request): Record<string, string> {
-  const headers: Record<string, string> = {};
+function isPrivateIp(ip: string): boolean {
+  return (
+    /^10\./.test(ip) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+    /^192\.168\./.test(ip) ||
+    ip === "127.0.0.1" ||
+    ip === "::1"
+  );
+}
 
-  // ── Client IP ──────────────────────────────────────────────────────────────
-  // x-forwarded-for is a comma-separated chain: client, proxy1, ..., last-proxy
-  // The last entry is the dynamic load balancer (Replit), so the real client
-  // IP is the second-to-last. If there's only one entry, use it directly.
+export function getRepliersHeaders(req: Request): Record<string, string> {
+  // Parse the full x-forwarded-for chain (client, proxy1, proxy2, ..., edge)
   const forwardedFor = (req.headers["x-forwarded-for"] as string | undefined ?? "")
     .split(",")
     .map((ip) => ip.trim())
     .filter(Boolean);
 
-  let realIp: string;
-  if (forwardedFor.length >= 2) {
-    realIp = forwardedFor[forwardedFor.length - 2];
-  } else {
-    realIp = forwardedFor[0] ?? req.socket.remoteAddress?.replace(/^::ffff:/, "") ?? "";
-  }
+  // Find the first public (non-private) IP — private IPs are always internal
+  // proxy hops, never the real client, regardless of proxy topology.
+  const realIp =
+    forwardedFor.find((ip) => isValidIp(ip) && !isPrivateIp(ip)) ??
+    forwardedFor[0] ??
+    req.socket.remoteAddress?.replace(/^::ffff:/, "") ??
+    "";
 
-  if (!isValidIp(realIp)) {
-    realIp = req.socket.remoteAddress?.replace(/^::ffff:/, "") ?? "";
-  }
-
-  headers["x-repliers-forwarded-for"] = realIp;
-
-  return headers;
+  return { "x-repliers-forwarded-for": realIp };
 }
