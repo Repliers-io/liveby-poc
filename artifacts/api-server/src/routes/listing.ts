@@ -17,6 +17,8 @@ router.get("/listing/:mlsNumber", async (req, res) => {
 
   const url = new URL(`${REPLIERS_API_URL}/${encodeURIComponent(mlsNumber)}`);
   if (boardId) url.searchParams.set("boardId", boardId);
+  url.searchParams.set("locations", "true");
+  url.searchParams.set("locationsSource", "LiveBy");
 
   try {
     const response = await fetch(url.toString(), {

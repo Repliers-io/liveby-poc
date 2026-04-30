@@ -1,8 +1,32 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X, ChevronLeft, ChevronRight, Bed, Bath, SquareIcon, Home, Calendar, Clock } from "lucide-react";
 
 const CDN = "https://cdn.repliers.io/";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type LocationEntry = {
+  locationId: string;
+  type: string;
+  subType: string | null;
+  name: string;
+  address?: {
+    city?: string;
+    state?: string;
+    zip?: string;
+    street?: string;
+    neighborhood?: string;
+    area?: string;
+  };
+  map: {
+    latitude: string | number;
+    longitude: string | number;
+    geometryType?: string;
+    boundary?: number[][][][];
+  };
+  size?: number;
+};
 
 type ListingDetail = {
   mlsNumber: string;
@@ -19,6 +43,7 @@ type ListingDetail = {
   simpleDaysOnMarket: number | null;
   boardId: string | number;
   images: string[];
+  map?: { latitude: string | number; longitude: string | number };
   address: {
     streetNumber?: string;
     streetName?: string;
@@ -45,7 +70,229 @@ type ListingDetail = {
     brokerage?: { name?: string };
   }>;
   office?: { brokerageName?: string };
+  locations?: LocationEntry[];
 };
+
+// ─── Location type config ──────────────────────────────────────────────────────
+
+const TYPE_ORDER = [
+  "neighborhood", "postalCode", "district", "area",
+  "schoolDistrict", "city", "city-alternate", "school",
+];
+
+const TYPE_LABELS: Record<string, string> = {
+  school: "School",
+  neighborhood: "Neighbourhood",
+  city: "City",
+  "city-alternate": "City Area",
+  area: "County",
+  postalCode: "Postal Code",
+  district: "District",
+  schoolDistrict: "School District",
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  school: "#f59e0b",
+  neighborhood: "#22d3ee",
+  city: "#a78bfa",
+  "city-alternate": "#a78bfa",
+  area: "#34d399",
+  postalCode: "#60a5fa",
+  district: "#fb923c",
+  schoolDistrict: "#fbbf24",
+};
+
+function typeColor(type: string) {
+  return TYPE_COLORS[type] ?? "#94a3b8";
+}
+
+function typeLabel(type: string) {
+  return TYPE_LABELS[type] ?? type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+// ─── SVG boundary mini-map ────────────────────────────────────────────────────
+
+function BoundaryMiniMap({
+  boundary,
+  color,
+  propLat,
+  propLng,
+}: {
+  boundary: number[][][][];
+  color: string;
+  propLat?: number;
+  propLng?: number;
+}) {
+  const W = 340;
+  const H = 160;
+  const PAD = 12;
+
+  const { paths, dotX, dotY } = useMemo(() => {
+    // Flatten all coordinates to find bounds
+    const pts: [number, number][] = [];
+    for (const polygon of boundary) {
+      for (const ring of polygon) {
+        for (const c of ring) pts.push([c[0], c[1]]);
+      }
+    }
+
+    if (pts.length === 0) return { paths: [], dotX: null, dotY: null };
+
+    const minLng = Math.min(...pts.map((p) => p[0]));
+    const maxLng = Math.max(...pts.map((p) => p[0]));
+    const minLat = Math.min(...pts.map((p) => p[1]));
+    const maxLat = Math.max(...pts.map((p) => p[1]));
+
+    const lngSpan = maxLng - minLng || 0.001;
+    const latSpan = maxLat - minLat || 0.001;
+
+    // Preserve aspect ratio with letterbox
+    const drawW = W - PAD * 2;
+    const drawH = H - PAD * 2;
+    const scaleX = drawW / lngSpan;
+    const scaleY = drawH / latSpan;
+    const scale = Math.min(scaleX, scaleY);
+    const offsetX = PAD + (drawW - lngSpan * scale) / 2;
+    const offsetY = PAD + (drawH - latSpan * scale) / 2;
+
+    const project = (lng: number, lat: number): [number, number] => [
+      offsetX + (lng - minLng) * scale,
+      H - offsetY - (lat - minLat) * scale,
+    ];
+
+    const builtPaths: string[] = [];
+    for (const polygon of boundary) {
+      for (const ring of polygon) {
+        const coords = ring.map(([lng, lat]) => project(lng, lat).join(","));
+        builtPaths.push(`M${coords.join("L")}Z`);
+      }
+    }
+
+    let dotX: number | null = null;
+    let dotY: number | null = null;
+    if (propLng != null && propLat != null) {
+      [dotX, dotY] = project(propLng, propLat);
+    }
+
+    return { paths: builtPaths, dotX, dotY };
+  }, [boundary, propLat, propLng]);
+
+  if (paths.length === 0) return null;
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      style={{ display: "block", background: "#0f0f0f", borderRadius: 8 }}
+    >
+      {/* Grid dots for map feel */}
+      <pattern id="grid" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+        <circle cx="10" cy="10" r="0.8" fill="#2a2a2a" />
+      </pattern>
+      <rect width={W} height={H} fill="url(#grid)" />
+
+      {paths.map((d, i) => (
+        <path key={i} d={d} fill={color + "2a"} stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+      ))}
+
+      {dotX != null && dotY != null && (
+        <>
+          <circle cx={dotX} cy={dotY} r={6} fill={color} opacity={0.25} />
+          <circle cx={dotX} cy={dotY} r={3} fill="#f4f4f5" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+// ─── Locations section ─────────────────────────────────────────────────────────
+
+function LocationsSection({
+  locations,
+  propLat,
+  propLng,
+}: {
+  locations: LocationEntry[];
+  propLat?: number;
+  propLng?: number;
+}) {
+  // Group by type in display order
+  const grouped = useMemo(() => {
+    const map = new Map<string, LocationEntry[]>();
+    for (const loc of locations) {
+      const arr = map.get(loc.type) ?? [];
+      arr.push(loc);
+      map.set(loc.type, arr);
+    }
+    const ordered: Array<{ type: string; entries: LocationEntry[] }> = [];
+    for (const type of TYPE_ORDER) {
+      if (map.has(type)) ordered.push({ type, entries: map.get(type)! });
+    }
+    // Append any unknown types
+    for (const [type, entries] of map) {
+      if (!TYPE_ORDER.includes(type)) ordered.push({ type, entries });
+    }
+    return ordered;
+  }, [locations]);
+
+  if (grouped.length === 0) return null;
+
+  return (
+    <Section title="Locations">
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {grouped.map(({ type, entries }) => (
+          <div key={type}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: typeColor(type),
+              textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8,
+            }}>
+              {typeLabel(type)}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {entries.map((loc) => {
+                const boundary = loc.map?.boundary;
+                const clat = parseFloat(String(loc.map?.latitude));
+                const clng = parseFloat(String(loc.map?.longitude));
+                return (
+                  <div key={loc.locationId} style={{
+                    background: "#27272a",
+                    borderRadius: 10,
+                    overflow: "hidden",
+                    border: `1px solid ${typeColor(loc.type)}33`,
+                  }}>
+                    {boundary && boundary.length > 0 && (
+                      <BoundaryMiniMap
+                        boundary={boundary}
+                        color={typeColor(loc.type)}
+                        propLat={propLat ?? clat}
+                        propLng={propLng ?? clng}
+                      />
+                    )}
+                    <div style={{ padding: "8px 12px 10px" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#f4f4f5" }}>{loc.name}</div>
+                      {loc.address?.city && (
+                        <div style={{ fontSize: 11, color: "#71717a", marginTop: 2 }}>
+                          {[loc.address.street, loc.address.city, loc.address.state].filter(Boolean).join(", ")}
+                        </div>
+                      )}
+                      {loc.size != null && (
+                        <div style={{ fontSize: 11, color: "#52525b", marginTop: 2 }}>
+                          {loc.size.toFixed(1)} km²
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 async function fetchListing(mlsNumber: string, boardId: string): Promise<ListingDetail> {
   const params = new URLSearchParams({ boardId });
@@ -71,6 +318,8 @@ function statusBadge(listing: ListingDetail) {
   if (s.includes("active") || s === "a" || s === "new") return { label: listing.lastStatus || "Active", bg: "#16a34a" };
   return { label: listing.standardStatus || listing.status, bg: "#6b7280" };
 }
+
+// ─── Main drawer ───────────────────────────────────────────────────────────────
 
 type Props = {
   mlsNumber: string | null;
@@ -108,6 +357,9 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
   const baths = details.numBathrooms;
   const bathsPlus = details.numBathroomsPlus;
   const dom = data?.simpleDaysOnMarket ?? data?.daysOnMarket;
+
+  const propLat = data?.map?.latitude != null ? parseFloat(String(data.map.latitude)) : undefined;
+  const propLng = data?.map?.longitude != null ? parseFloat(String(data.map.longitude)) : undefined;
 
   const streetLine = [addr.streetNumber, addr.unitNumber ? `#${addr.unitNumber}` : null, addr.streetName, addr.streetSuffix]
     .filter(Boolean).join(" ");
@@ -179,7 +431,7 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
           </div>
         )}
 
-        {/* Close button */}
+        {/* Close */}
         <button
           onClick={onClose}
           style={{
@@ -191,13 +443,11 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
           <X size={16} color="#fff" />
         </button>
 
-        {/* Status badge */}
         {badge && (
           <div style={{
             position: "absolute", top: 10, left: 10,
             background: badge.bg, color: "#fff", fontSize: 11, fontWeight: 700,
-            padding: "3px 9px", borderRadius: 9999, letterSpacing: "0.05em",
-            textTransform: "uppercase",
+            padding: "3px 9px", borderRadius: 9999, letterSpacing: "0.05em", textTransform: "uppercase",
           }}>
             {badge.label}
           </div>
@@ -214,7 +464,6 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
         )}
         {data && (
           <>
-            {/* Price */}
             <div style={{ marginBottom: 4 }}>
               <span style={{ fontSize: 24, fontWeight: 700, color: "#f4f4f5" }}>
                 {fmt(data.soldPrice ?? data.listPrice)}
@@ -226,7 +475,6 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
               )}
             </div>
 
-            {/* Address */}
             {streetLine && (
               <div style={{ fontSize: 14, color: "#d4d4d8", marginBottom: 2 }}>{streetLine}</div>
             )}
@@ -234,7 +482,6 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
               <div style={{ fontSize: 13, color: "#a1a1aa", marginBottom: 12 }}>{cityLine}</div>
             )}
 
-            {/* Key stats row */}
             <div style={{ display: "flex", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
               {beds != null && (
                 <StatPill icon={<Bed size={14} />} label={`${beds}${bedsPlus ? `+${bedsPlus}` : ""} bed`} />
@@ -247,7 +494,6 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
               )}
             </div>
 
-            {/* Details grid */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px", marginBottom: 16 }}>
               {details.propertyType && <Detail label="Type" value={details.propertyType} />}
               {dom != null && <Detail label="Days on market" value={`${dom} days`} icon={<Clock size={12} />} />}
@@ -257,7 +503,6 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
               <Detail label="MLS#" value={data.mlsNumber} />
             </div>
 
-            {/* Description */}
             {details.description && (
               <Section title="Description">
                 <p style={{ fontSize: 13, color: "#d4d4d8", lineHeight: 1.6, margin: 0 }}>
@@ -266,14 +511,12 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
               </Section>
             )}
 
-            {/* Extras */}
             {details.extras && (
               <Section title="Extras">
                 <p style={{ fontSize: 13, color: "#d4d4d8", lineHeight: 1.6, margin: 0 }}>{details.extras}</p>
               </Section>
             )}
 
-            {/* Agent */}
             {(agent?.name || brokerage) && (
               <Section title="Listing agent">
                 {agent?.name && <div style={{ fontSize: 13, color: "#d4d4d8", fontWeight: 600 }}>{agent.name}</div>}
@@ -283,12 +526,22 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
                 )}
               </Section>
             )}
+
+            {data.locations && data.locations.length > 0 && (
+              <LocationsSection
+                locations={data.locations}
+                propLat={propLat}
+                propLng={propLng}
+              />
+            )}
           </>
         )}
       </div>
     </div>
   );
 }
+
+// ─── Shared primitives ─────────────────────────────────────────────────────────
 
 function StatPill({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
@@ -316,7 +569,10 @@ function Detail({ label, value, icon }: { label: string; value: string | number;
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "#71717a", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>
+      <div style={{
+        fontSize: 11, fontWeight: 600, color: "#71717a",
+        textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6,
+      }}>
         {title}
       </div>
       {children}
