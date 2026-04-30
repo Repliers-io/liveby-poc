@@ -44,13 +44,15 @@ const DEFAULT_FILTERS: ListingFilters = {
   priceKey: null,
 };
 
-type LayerType = "area" | "city" | "neighborhood" | "school" | null;
+type LayerType = "area" | "city" | "neighborhood" | "school" | "postalCode" | "schoolDistrict" | null;
 
 const LAYER_CONFIG = {
-  area: { label: "Counties", color: "#3B82F6" },
-  city: { label: "Cities", color: "#10B981" },
-  neighborhood: { label: "Neighborhoods", color: "#F59E0B" },
-  school: { label: "Schools", color: "#8B5CF6" },
+  area:           { label: "Counties",         color: "#3B82F6" },
+  city:           { label: "Cities",           color: "#10B981" },
+  neighborhood:   { label: "Neighborhoods",    color: "#F59E0B" },
+  postalCode:     { label: "Postal Codes",     color: "#60A5FA" },
+  schoolDistrict: { label: "School Districts", color: "#FBBF24" },
+  school:         { label: "Schools",          color: "#8B5CF6" },
 };
 
 const SRC = "bounds-src";

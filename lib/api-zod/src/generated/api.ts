@@ -23,7 +23,14 @@ export const GetLocationsQueryParams = zod.object({
   lat: zod.coerce.number().describe("Latitude of the center point"),
   long: zod.coerce.number().describe("Longitude of the center point"),
   type: zod
-    .enum(["area", "city", "neighborhood", "school"])
+    .enum([
+      "area",
+      "city",
+      "neighborhood",
+      "school",
+      "postalCode",
+      "schoolDistrict",
+    ])
     .describe("Boundary type to fetch"),
 });
 

@@ -14,4 +14,6 @@ export const GetLocationsType = {
   city: "city",
   neighborhood: "neighborhood",
   school: "school",
+  postalCode: "postalCode",
+  schoolDistrict: "schoolDistrict",
 } as const;

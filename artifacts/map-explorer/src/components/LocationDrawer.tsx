@@ -11,7 +11,7 @@ import {
 import { type Demographics } from "./DemographicsDrawer";
 import { type SchoolData } from "./SchoolDrawer";
 
-type LayerType = "area" | "city" | "neighborhood" | "school" | null;
+type LayerType = "area" | "city" | "neighborhood" | "school" | "postalCode" | "schoolDistrict" | null;
 
 type MonthData = {
   month: string;

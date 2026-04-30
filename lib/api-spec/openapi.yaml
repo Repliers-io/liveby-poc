@@ -50,7 +50,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [area, city, neighborhood, school]
+            enum: [area, city, neighborhood, school, postalCode, schoolDistrict]
           description: Boundary type to fetch
       responses:
         "200":
