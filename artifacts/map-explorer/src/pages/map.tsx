@@ -430,40 +430,52 @@ export default function MapExplorer() {
   useEffect(() => { locationsRef.current = locationsData?.locations ?? []; }, [locationsData]);
 
   // Step 4: isolate selected boundary — filter + fill opacity + fit bounds
+  // fitBounds is a camera operation and does NOT require the FILL layer to exist.
+  // Filter/paint calls DO require the layer, so they are gated separately.
   useEffect(() => {
     const m = map.current;
     if (!m || !styleReady) return;
-    try {
-      if (!m.getLayer(FILL)) return;
-      if (selectedLocation) {
-        const f = ["==", ["get", "locationId"], selectedLocation.locationId] as maplibregl.FilterSpecification;
-        m.setFilter(FILL, f);
-        m.setFilter(LINE, f);
-        m.setPaintProperty(FILL, "fill-opacity", 0.1);
 
-        // Fit map to selected boundary — use the boundary stored at selection time (reliable),
-        // fall back to locationsRef lookup for backwards-compat.
-        const boundary =
-          selectedLocation.boundary ??
-          locationsRef.current.find((l) => l.locationId === selectedLocation.locationId)?.map?.boundary;
-        if (boundary) {
+    if (selectedLocation) {
+      // ── Camera: fit to the selected boundary ────────────────────────────────
+      const boundary =
+        selectedLocation.boundary ??
+        locationsRef.current.find((l) => l.locationId === selectedLocation.locationId)?.map?.boundary;
+      if (boundary) {
+        try {
           const bbox = getBbox(boundary);
           m.fitBounds(bbox, {
             padding: { top: 80, bottom: 80, left: 80, right: 420 },
             maxZoom: 14,
             duration: 600,
           });
-        }
-      } else {
-        m.setFilter(FILL, null);
-        m.setFilter(LINE, null);
-        m.setPaintProperty(FILL, "fill-opacity", 0);
+        } catch { /* map not ready for camera */ }
+      }
 
-        // Fit to all loaded boundaries so the user sees the full picture
-        const allCoords = locationsRef.current
-          .filter((l) => l.map?.boundary)
-          .flatMap((l) => flatCoords(l.map.boundary as unknown[]));
-        if (allCoords.length > 0) {
+      // ── Style: highlight just this boundary (only if layer exists) ──────────
+      try {
+        if (m.getLayer(FILL)) {
+          const f = ["==", ["get", "locationId"], selectedLocation.locationId] as maplibregl.FilterSpecification;
+          m.setFilter(FILL, f);
+          m.setFilter(LINE, f);
+          m.setPaintProperty(FILL, "fill-opacity", 0.1);
+        }
+      } catch { /* style not ready */ }
+    } else {
+      // ── No selection: reset filter/opacity and fit to all boundaries ────────
+      try {
+        if (m.getLayer(FILL)) {
+          m.setFilter(FILL, null);
+          m.setFilter(LINE, null);
+          m.setPaintProperty(FILL, "fill-opacity", 0);
+        }
+      } catch { /* style not ready */ }
+
+      const allCoords = locationsRef.current
+        .filter((l) => l.map?.boundary)
+        .flatMap((l) => flatCoords(l.map.boundary as unknown[]));
+      if (allCoords.length > 0) {
+        try {
           let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
           for (const [lng, lat] of allCoords) {
             if (lng < minLng) minLng = lng;
@@ -471,14 +483,9 @@ export default function MapExplorer() {
             if (lat < minLat) minLat = lat;
             if (lat > maxLat) maxLat = lat;
           }
-          m.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
-            padding: 80,
-            duration: 600,
-          });
-        }
+          m.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 600 });
+        } catch { /* map not ready for camera */ }
       }
-    } catch {
-      // layers not ready
     }
   }, [selectedLocation, styleReady, mapReady]);
 
@@ -519,22 +526,6 @@ export default function MapExplorer() {
       // Same layer (or no matching layer) — set directly
       if (targetLayer && !activeLayer) setActiveLayer(targetLayer);
       setSelectedLocation(sel);
-    }
-    // Fit bounds directly after renders settle — bypasses effect-ordering ambiguity
-    // when the layer switches at the same time as the location.
-    if (boundary && boundary.length > 0) {
-      requestAnimationFrame(() => {
-        const m = map.current;
-        if (!m) return;
-        try {
-          const bbox = getBbox(boundary as number[][][][]);
-          m.fitBounds(bbox, {
-            padding: { top: 80, bottom: 80, left: 80, right: 420 },
-            maxZoom: 14,
-            duration: 600,
-          });
-        } catch { /* map not ready */ }
-      });
     }
   }, [activeLayer]);
 
