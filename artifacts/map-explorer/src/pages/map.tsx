@@ -405,22 +405,25 @@ export default function MapExplorer() {
 
     src.setData({ type: "FeatureCollection", features });
 
-    // Fit to all boundaries on the first data load after a layer change
-    if (layerJustChangedRef.current && features.length > 0) {
+    // Fit to all boundaries on the first data load after a layer change —
+    // but skip if a specific location is already selected (Step 4 handles that fit).
+    if (layerJustChangedRef.current) {
       layerJustChangedRef.current = false;
-      const allCoords = features.flatMap((f) => {
-        const g = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
-        return flatCoords(g.coordinates as unknown[]);
-      });
-      if (allCoords.length > 0) {
-        let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-        for (const [lng, lat] of allCoords) {
-          if (lng < minLng) minLng = lng;
-          if (lng > maxLng) maxLng = lng;
-          if (lat < minLat) minLat = lat;
-          if (lat > maxLat) maxLat = lat;
+      if (features.length > 0 && !selectedRef.current) {
+        const allCoords = features.flatMap((f) => {
+          const g = f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon;
+          return flatCoords(g.coordinates as unknown[]);
+        });
+        if (allCoords.length > 0) {
+          let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+          for (const [lng, lat] of allCoords) {
+            if (lng < minLng) minLng = lng;
+            if (lng > maxLng) maxLng = lng;
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+          }
+          m.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 600 });
         }
-        m.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 600 });
       }
     }
   }, [locationsData, styleReady]);
