@@ -334,7 +334,6 @@ export default function MapExplorer() {
       if (!e.features?.length) return;
       const props = e.features[0].properties as { mlsNumber: string; boardId: string };
       setSelectedListing({ mlsNumber: props.mlsNumber, boardId: props.boardId });
-      setSelectedLocation(null);
     };
 
     m.on("mouseenter", LISTINGS_DOT, onDotEnter);
@@ -937,7 +936,7 @@ export default function MapExplorer() {
       {/* Unified drawer — Demographics, School Details, and Market Statistics tabs */}
       {layerCfg && (
         <LocationDrawer
-          open={!!selectedLocation}
+          open={!!selectedLocation && !selectedListing}
           name={selectedLocation?.name ?? ""}
           locationId={selectedLocation?.locationId ?? ""}
           listingType={listingFilters.listingType}

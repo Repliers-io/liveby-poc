@@ -118,15 +118,15 @@ export default function ListingDrawer({ mlsNumber, boardId, onClose }: Props) {
       style={{
         position: "fixed",
         top: 0,
-        left: 0,
+        right: 0,
         bottom: 0,
         width: 380,
         zIndex: 40,
         display: "flex",
         flexDirection: "column",
         background: "#18181b",
-        boxShadow: "4px 0 24px rgba(0,0,0,0.6)",
-        transform: open ? "translateX(0)" : "translateX(-100%)",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.6)",
+        transform: open ? "translateX(0)" : "translateX(100%)",
         transition: "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
         overflowY: "auto",
       }}
