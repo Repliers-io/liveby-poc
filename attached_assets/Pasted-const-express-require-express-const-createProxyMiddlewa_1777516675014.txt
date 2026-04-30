@@ -1,0 +1,107 @@
+const express = require('express');
+const { createProxyMiddleware } = require('http-proxy-middleware');
+const app = express();
+
+// Configuration
+const TARGET_URL = 'https://api.repliers.io';
+const PORT = process.env.PORT || 3000;
+
+// Enable proxy trust for X-Forwarded-For handling
+app.set('trust proxy', true);
+
+// Parse JSON bodies
+app.use(express.json());
+
+// IP forwarding middleware - set header before proxy
+app.use((req, res, next) => {
+    let realIP;
+    
+    // Get X-Forwarded-For header and split it into array
+    const forwardedFor = (req.headers['x-forwarded-for'] || '').split(',').map(ip => ip.trim());
+    
+    if (forwardedFor.length >= 2) {
+        // Always take the second-to-last IP since the last one is our dynamic load balancer
+        realIP = forwardedFor[forwardedFor.length - 2];
+    } else {
+        // If there's only one IP in the chain, use it
+        // This could happen for direct connections or simple proxy setups
+        realIP = forwardedFor[0] || req.connection.remoteAddress?.replace(/^::ffff:/, '');
+    }
+
+    // Validate IP format
+    const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    const ipv6Regex = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/;
+    
+    if (!ipv4Regex.test(realIP) && !ipv6Regex.test(realIP)) {
+        console.warn(`Invalid IP format detected: ${realIP}`);
+        realIP = req.connection.remoteAddress?.replace(/^::ffff:/, '');
+    }
+
+    // Log only the processed client IP
+    // console.log(`Client IP: ${realIP}`);
+
+    req.headers['x-repliers-forwarded-for'] = realIP;
+    req.headers['x-repliers-isClientSide'] = 'true';
+    
+    // Forward the referring domain
+    const referer = req.headers['referer'] || req.headers['referrer'];
+    if (referer) {
+        try {
+            const refererUrl = new URL(referer);
+            const refererDomain = refererUrl.hostname;
+            req.headers['x-repliers-referring-domain'] = refererDomain;
+            // console.log(`Referring domain: ${refererDomain}`);
+        } catch (err) {
+            console.warn(`Invalid referer URL: ${referer}`);
+            req.headers['x-repliers-referring-domain'] = 'invalid';
+        }
+    } else {
+        req.headers['x-repliers-referring-domain'] = 'none';
+    }
+    
+    next();
+});
+
+// Create proxy middleware
+const proxy = createProxyMiddleware({
+    target: TARGET_URL,
+    changeOrigin: true,
+    secure: true,
+    ws: true,
+    followRedirects: true,
+    proxyTimeout: 30000,
+    headers: {
+        connection: 'keep-alive'
+    },
+    onProxyReq: (proxyReq, req, res) => {
+        // If there's a body, restream it
+        if (req.body && Object.keys(req.body).length > 0) {
+            const bodyData = JSON.stringify(req.body);
+            proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+            proxyReq.write(bodyData);
+        }
+    },
+    onProxyRes: (proxyRes, req, res) => {},
+    onError: (err, req, res) => {
+        console.error('Proxy Error:', err);
+        res.status(500).send('Proxy Error');
+    }
+});
+
+// Apply proxy middleware
+app.use('/', proxy);
+
+// Start server
+const server = app.listen(PORT, () => {
+    console.log(`Proxy server running on port ${PORT}`);
+    console.log(`Forwarding requests to: ${TARGET_URL}`);
+});
+
+// Error handling
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled Rejection:', err);
+});

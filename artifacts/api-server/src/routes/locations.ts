@@ -31,8 +31,7 @@ router.get("/locations", async (req, res) => {
   url.searchParams.set("type", type);
   url.searchParams.set("fields", REPLIERS_FIELDS);
 
-  const clientIp = (req.headers["x-forwarded-for"] as string | undefined)
-    ?.split(",")[0]?.trim() || req.ip || "";
+  const clientIp = req.ip ?? "";
 
   try {
     const response = await fetch(url.toString(), {

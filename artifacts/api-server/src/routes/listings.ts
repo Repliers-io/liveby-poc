@@ -42,8 +42,7 @@ router.get("/listings", async (req, res) => {
   if (maxPrice) url.searchParams.set("maxPrice", maxPrice);
   if (mapBounds) url.searchParams.set("map", mapBounds);
 
-  const clientIp = (req.headers["x-forwarded-for"] as string | undefined)
-    ?.split(",")[0]?.trim() || req.ip || "";
+  const clientIp = req.ip ?? "";
 
   try {
     const response = await fetch(url.toString(), {

@@ -23,8 +23,7 @@ router.get("/listing/:mlsNumber", async (req, res) => {
     url.searchParams.append("locationsType", type);
   }
 
-  const clientIp = (req.headers["x-forwarded-for"] as string | undefined)
-    ?.split(",")[0]?.trim() || req.ip || "";
+  const clientIp = req.ip ?? "";
 
   try {
     const response = await fetch(url.toString(), {
