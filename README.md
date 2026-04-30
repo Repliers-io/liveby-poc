@@ -1,6 +1,8 @@
 # LiveBy POC — Map Boundary Explorer
 
-A full-screen, interactive map application for exploring real estate boundaries and listings, built on the [Repliers API](https://repliers.io) and [LiveBy](https://liveby.com) location data.
+**Live demo:** https://58374f10-579b-4ccb-9c8e-df48914c032d-00-xcaipo3y8g91.kirk.replit.dev/
+
+A full-screen, interactive map application for exploring real estate boundaries and listings, built on the [Repliers API](https://repliers.com) and [LiveBy](https://liveby.com) location data.
 
 ---
 
