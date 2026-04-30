@@ -31,19 +31,6 @@ export function getRepliersHeaders(req: Request): Record<string, string> {
   }
 
   headers["x-repliers-forwarded-for"] = realIp;
-  headers["x-repliers-isClientSide"] = "true";
-
-  // ── Referring domain ───────────────────────────────────────────────────────
-  const referer = (req.headers["referer"] ?? req.headers["referrer"]) as string | undefined;
-  if (referer) {
-    try {
-      headers["x-repliers-referring-domain"] = new URL(referer).hostname;
-    } catch {
-      headers["x-repliers-referring-domain"] = "invalid";
-    }
-  } else {
-    headers["x-repliers-referring-domain"] = "none";
-  }
 
   return headers;
 }
