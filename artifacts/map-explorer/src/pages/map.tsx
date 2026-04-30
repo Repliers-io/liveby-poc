@@ -4,11 +4,14 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useGetLocations, getGetLocationsQueryKey, GetLocationsType } from "@workspace/api-client-react";
 import { Loader2, Layers, Home } from "lucide-react";
 import LocationDrawer from "../components/LocationDrawer";
+import ListingDrawer from "../components/ListingDrawer";
 import { type Demographics } from "../components/DemographicsDrawer";
 import { type SchoolData } from "../components/SchoolDrawer";
 
 type RawListing = {
   map: { latitude: number; longitude: number };
+  mlsNumber: string;
+  boardId?: string;
 };
 
 const LISTINGS_SRC = "listings-src";
@@ -89,6 +92,7 @@ export default function MapExplorer() {
   const [styleReady, setStyleReady] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
+  const [selectedListing, setSelectedListing] = useState<{ mlsNumber: string; boardId: string } | null>(null);
   const [listingCount, setListingCount] = useState<{ loaded: number; total: number } | null>(null);
   const [listingsLoading, setListingsLoading] = useState(false);
   const [listingFilters, setListingFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
@@ -283,6 +287,8 @@ export default function MapExplorer() {
 
     const onClick = (e: maplibregl.MapLayerMouseEvent) => {
       if (!e.features?.length) return;
+      // Don't respond to boundary clicks when a listing dot is at this point
+      if (m.getLayer(LISTINGS_DOT) && m.queryRenderedFeatures(e.point, { layers: [LISTINGS_DOT] }).length) return;
       tooltip.remove();
       const props = e.features[0].properties as {
         name: string;
@@ -316,6 +322,32 @@ export default function MapExplorer() {
       removeLayers();
     };
   }, [activeLayer, mapReady, styleReady]);
+
+  // Step 2b: listing dot interactions (hover cursor + click-to-detail)
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !mapReady || !styleReady) return;
+
+    const onDotEnter = () => { m.getCanvas().style.cursor = "pointer"; };
+    const onDotLeave = () => { m.getCanvas().style.cursor = ""; };
+    const onDotClick = (e: maplibregl.MapLayerMouseEvent) => {
+      if (!e.features?.length) return;
+      const props = e.features[0].properties as { mlsNumber: string; boardId: string };
+      setSelectedListing({ mlsNumber: props.mlsNumber, boardId: props.boardId });
+      setSelectedLocation(null);
+    };
+
+    m.on("mouseenter", LISTINGS_DOT, onDotEnter);
+    m.on("mouseleave", LISTINGS_DOT, onDotLeave);
+    m.on("click", LISTINGS_DOT, onDotClick);
+
+    return () => {
+      if (!map.current) return;
+      m.off("mouseenter", LISTINGS_DOT, onDotEnter);
+      m.off("mouseleave", LISTINGS_DOT, onDotLeave);
+      m.off("click", LISTINGS_DOT, onDotClick);
+    };
+  }, [mapReady, styleReady]);
 
   // Step 3b: push new data into the existing source (no layer teardown → no flicker)
   useEffect(() => {
@@ -573,7 +605,7 @@ export default function MapExplorer() {
         featureMap.set(key, {
           type: "Feature",
           geometry: { type: "Point", coordinates: [l.map.longitude, l.map.latitude] },
-          properties: { batchId: batchNum },
+          properties: { batchId: batchNum, mlsNumber: l.mlsNumber, boardId: l.boardId ?? "" },
         });
         addedAny = true;
       }
@@ -894,6 +926,13 @@ export default function MapExplorer() {
           );
         })()}
       </div>
+
+      {/* Listing detail drawer */}
+      <ListingDrawer
+        mlsNumber={selectedListing?.mlsNumber ?? null}
+        boardId={selectedListing?.boardId ?? ""}
+        onClose={() => setSelectedListing(null)}
+      />
 
       {/* Unified drawer — Demographics, School Details, and Market Statistics tabs */}
       {layerCfg && (

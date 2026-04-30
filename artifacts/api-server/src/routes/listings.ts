@@ -3,7 +3,7 @@ import { Router } from "express";
 const router = Router();
 
 const REPLIERS_API_URL = "https://api.repliers.io/listings";
-const LISTING_FIELDS = "map";
+const LISTING_FIELDS = "map,mlsNumber,boardId";
 
 router.get("/listings", async (req, res) => {
   const {
