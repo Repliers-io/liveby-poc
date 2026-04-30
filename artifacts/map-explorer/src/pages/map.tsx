@@ -75,6 +75,7 @@ type SelectedLocation = {
   locationId: string;
   demographics: Demographics;
   school: SchoolData | null;
+  boundary?: number[][][][] | number[][][];
 };
 
 // Flatten any depth of coordinate arrays to extract [lng, lat] pairs
@@ -311,11 +312,14 @@ export default function MapExplorer() {
         demographics: string;
         school: string;
       };
+      // Capture boundary now while locationsRef is guaranteed to have it (the feature was just clicked)
+      const locEntry = locationsRef.current.find((l) => l.locationId === props.locationId);
       setSelectedLocation({
         name: props.name,
         locationId: props.locationId,
         demographics: JSON.parse(props.demographics || "{}") as Demographics,
         school: JSON.parse(props.school || "null") as SchoolData | null,
+        boundary: locEntry?.map?.boundary,
       });
     };
 
@@ -437,10 +441,13 @@ export default function MapExplorer() {
         m.setFilter(LINE, f);
         m.setPaintProperty(FILL, "fill-opacity", 0.1);
 
-        // Fit map to selected boundary (leave room for drawer on the right)
-        const loc = locationsRef.current.find((l) => l.locationId === selectedLocation.locationId);
-        if (loc?.map?.boundary) {
-          const bbox = getBbox(loc.map.boundary);
+        // Fit map to selected boundary — use the boundary stored at selection time (reliable),
+        // fall back to locationsRef lookup for backwards-compat.
+        const boundary =
+          selectedLocation.boundary ??
+          locationsRef.current.find((l) => l.locationId === selectedLocation.locationId)?.map?.boundary;
+        if (boundary) {
+          const bbox = getBbox(boundary);
           m.fitBounds(bbox, {
             padding: { top: 80, bottom: 80, left: 80, right: 420 },
             maxZoom: 14,
@@ -492,12 +499,14 @@ export default function MapExplorer() {
     type: string;
     demographics?: Record<string, unknown> | null;
     school?: Record<string, unknown> | null;
+    map?: { boundary?: number[][][][]; latitude?: string | number; longitude?: string | number };
   }) => {
     const sel: SelectedLocation = {
       name: loc.name,
       locationId: loc.locationId,
       demographics: (loc.demographics ?? {}) as Demographics,
       school: (loc.school ?? null) as SchoolData | null,
+      boundary: loc.map?.boundary,
     };
     const targetLayer: LayerType = LOCATION_TYPE_TO_LAYER[loc.type] ?? null;
     setSelectedListing(null);
